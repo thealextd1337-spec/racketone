@@ -36,6 +36,7 @@ import eu.advantly.data.LocalData
 import eu.advantly.data.scoreEvents
 import eu.advantly.device.link.LiveViewsProvider
 import eu.advantly.match.session.AndroidMatchSessions
+import eu.advantly.match.session.MatchSession
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.presentation.auth.GoogleCredential
 import eu.advantly.presentation.auth.PhonePullPort
@@ -60,6 +61,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
@@ -462,6 +464,49 @@ internal suspend fun runScheduledSync(
     core.sync.request(profile)?.join()
     return false
 }
+
+/**
+ * Live-Übertragung ([eu.advantly.android.sync.LiveRelay]): bestätigte Zuschauer von [matchId] vom Server holen, auch auf
+ * einem anderen Gerät benannte. `false`: Match noch nicht auf dem Server (hochgeladen oder als Mitglied gezogen) – später
+ * erneut. Die Abfrage selbst läuft erst nach dem aktuellen Rückruf: Der Konto-Host darf nicht mitten im Bootstrap oder in
+ * einem Session-Listener entstehen. Fehler bleiben still (nächster Versuch im nächsten Vordergrund). Nur auf Main.
+ */
+internal fun refreshMatchVisitors(
+    context: Context,
+    session: MatchSession,
+    profile: String,
+    matchId: String,
+): Boolean {
+    val app = context.applicationContext
+    val onServer =
+        AndroidInstallationGuard.storage(app) {
+            session.data.cloudUploads.headerUploaded(matchId) || session.data.cloudPulls.pulledMatch(profile, matchId) != null
+        } == true
+    if (!onServer) return false
+    Handler(Looper.getMainLooper()).post {
+        if ((app as? AdvantlyPhoneApplication)?.bootstrap() == false) return@post
+        val core =
+            try {
+                PhoneAccountCore.get(app, BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_KEY)
+            } catch (_: Exception) {
+                null
+            } ?: return@post
+        core.runtime.scope.launch {
+            try {
+                // Kaltstart: Die Kontoprüfung (Activity oder Abgleich) setzt die Sitzung gleich.
+                val current = withTimeoutOrNull(VISITOR_LOOKUP_SESSION_MS) { core.auth.session.first { it != null } }
+                if (current?.profileId == profile) core.visitors.refreshConfirmed(profile, matchId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Offline oder gestört: im nächsten Vordergrund erneut.
+            }
+        }
+    }
+    return true
+}
+
+private const val VISITOR_LOOKUP_SESSION_MS = 30_000L
 
 /**
  * Uhr-Zuschauen über den prozessweiten Konto-Host (nach Prozesstod wie [runScheduledSync] angelegt). Nur auf Main und

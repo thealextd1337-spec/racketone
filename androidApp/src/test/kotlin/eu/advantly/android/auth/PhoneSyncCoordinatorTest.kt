@@ -2,8 +2,8 @@ package eu.advantly.android.auth
 
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
-import eu.advantly.android.sync.liveRelayWanted
-import eu.advantly.android.sync.onLiveRelay
+import eu.advantly.android.sync.LiveRelay
+import eu.advantly.android.sync.hasLiveAudience
 import eu.advantly.android.sync.onLiveScore
 import eu.advantly.android.sync.onMatchFinished
 import eu.advantly.android.sync.onTelemetryChanged
@@ -29,7 +29,6 @@ import eu.advantly.core.scoring.Presets
 import eu.advantly.data.LocalData
 import eu.advantly.data.db.AdvantlyDatabase
 import eu.advantly.device.link.testing.ManualScheduler
-import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.MatchSessions
 import eu.advantly.match.session.ScorerChoice
@@ -38,6 +37,7 @@ import eu.advantly.presentation.auth.PhoneSyncBlock
 import eu.advantly.presentation.auth.PhoneSyncState
 import eu.advantly.presentation.auth.PhoneSyncStatus
 import eu.advantly.presentation.friends.LiveScoreUpload
+import eu.advantly.presentation.friends.PendingVisitorStore
 import eu.advantly.sync.protocol.PeerKind
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.auth.auth
@@ -869,16 +869,24 @@ class PhoneSyncCoordinatorTest {
         }
 
     /**
-     * Live-Übertragung im Vordergrund: solange angemeldet und die eigene Uhr ein laufendes Match zählt – auch ohne
-     * lokal bekanntes Publikum (M6: am Server bestätigte Zuschauer kennt das Handy nicht). Pause, Ende, Abgabe (hier:
-     * das Handy übernimmt) und Abmelden beenden sie.
+     * Live-Übertragung im Vordergrund nur mit Publikum: Die eigene Uhr zählt ein laufendes Match mit verknüpften
+     * Mitspielern oder Zuschauern – vorgemerkt, bestätigt oder nachträglich (anderes Gerät) am Server benannt. Ohne
+     * Publikum, nach Entfernen des letzten Zuschauers, Pause, Ende, Abgabe (hier: das Handy übernimmt) und Abmelden
+     * kein Dienst.
      */
-    @Test fun liveRelayRunsWhileMyWatchScoresARunningMatch() =
+    @Test fun liveRelayRunsOnlyWhileMyWatchScoresARunningMatchWithAudience() =
         runBlocking {
             val f = Fixture(this)
+            val store = Visitors()
             var signedIn = true
             var running: Boolean? = null
-            val remove = onLiveRelay(f.phone, { signedIn }) { running = it }
+            var onServer = false
+            val asked = mutableListOf<String>()
+            val relay =
+                LiveRelay(f.phone, { signedIn }, { hasLiveAudience(f.data, store, "alice", it) }, {
+                    asked += it.id.value
+                    onServer
+                }) { running = it }
             try {
                 val id =
                     f.phone.create(
@@ -886,35 +894,75 @@ class PhoneSyncCoordinatorTest {
                         Lineup(listOf(PlayerId("a")), listOf(PlayerId("b")), PlayerId("a")),
                         scorer = ScorerChoice.MyWatch,
                     )
-                assertEquals("„Meine Uhr“ zählt, ohne verknüpfte Mitspieler oder Zuschauer", true, running)
-                val match =
-                    checkNotNull(
-                        f.phone.state.value
-                            .match(id),
-                    )
-                val watch: (ActiveMatch) -> Boolean = { true }
-                assertTrue(liveRelayWanted(true, listOf(match), watch))
-                assertFalse("abgemeldet", liveRelayWanted(false, listOf(match), watch))
-                for (status in listOf(MatchStatus.PAUSED, MatchStatus.FINISHED)) {
-                    val other = match.copy(state = match.state.copy(status = status))
-                    assertFalse(status.name, liveRelayWanted(true, listOf(other), watch))
-                }
-                assertFalse("Abgabe: die Uhr zählt nicht mehr", liveRelayWanted(true, listOf(match), { false }))
+                val m = id.value
+                assertEquals("„Meine Uhr“ zählt, ohne Publikum kein Dienst", false, running)
+                assertTrue("noch nicht hochgeladen: Server später fragen", asked.isNotEmpty() && asked.all { it == m })
+                onServer = true
+                asked.clear()
+                relay.evaluate()
+                relay.evaluate()
+                assertEquals("einmal je Match, sobald hochgeladen", listOf(m), asked)
 
-                // Über die Session: abgemeldet → kein Dienst; „Meine Uhr“ zählt → Dienst; das Handy übernimmt → kein Dienst
+                store.pending = mapOf(m to setOf("vera"))
+                relay.evaluate()
+                assertEquals("vorgemerkter Zuschauer", true, running)
+                store.confirmed = mapOf(m to setOf("vera")) // gesendet: bestätigt, nicht mehr vorgemerkt
+                store.pending = emptyMap()
+                relay.evaluate()
+                assertEquals("bestätigter Zuschauer", true, running)
+                store.confirmed = emptyMap()
+                relay.evaluate()
+                assertEquals("letzter Zuschauer entfernt", false, running)
+                assertEquals(listOf(m), asked)
+
+                // Nachträglich auf einem anderen Gerät benannt: Der Vordergrund fragt erneut, die Antwort startet den Dienst.
+                relay.onForeground()
+                assertEquals(listOf(m, m), asked)
+                store.confirmed = mapOf(m to setOf("carol"))
+                relay.evaluate()
+                assertEquals(true, running)
+
                 signedIn = false
-                f.phone.setTelemetryVisibility(TelemetryVisibility.OFF) // irgendein neuer Session-Zustand
-                assertEquals(false, running)
+                relay.evaluate()
+                assertEquals("abgemeldet", false, running)
                 signedIn = true
-                f.phone.setTelemetryVisibility(TelemetryVisibility.SHARE)
+                val state = f.phone.state.value
+                val match = checkNotNull(state.match(id))
+                for (status in listOf(MatchStatus.PAUSED, MatchStatus.FINISHED)) {
+                    relay.evaluate(state.copy(matches = listOf(match.copy(state = match.state.copy(status = status)))))
+                    assertEquals(status.name, false, running)
+                }
+                relay.evaluate()
                 assertEquals(true, running)
                 assertTrue(f.phone.takeOverScoring(id))
-                assertEquals(false, running)
+                assertEquals("Abgabe: die Uhr zählt nicht mehr", false, running)
+
+                // Verknüpfter Mitspieler mit Konto genügt als Publikum, nur für dieses Konto.
+                store.confirmed = emptyMap()
+                assertNotNull(f.data.players.rememberFriend("alice", "p-bob", "Bob", 0) { PlayerId("f1") })
+                val withFriend = match.copy(lineup = Lineup(listOf(PlayerId("a")), listOf(PlayerId("f1")), PlayerId("a")))
+                assertFalse(hasLiveAudience(f.data, store, "alice", match))
+                assertTrue(hasLiveAudience(f.data, store, "alice", withFriend))
+                assertFalse(hasLiveAudience(f.data, store, "bob", withFriend))
             } finally {
-                remove()
+                relay.close()
                 f.close()
             }
         }
+
+    private class Visitors : PendingVisitorStore {
+        var pending = emptyMap<String, Set<String>>()
+        var confirmed = emptyMap<String, Set<String>>()
+
+        override fun pending(profileId: String) = if (profileId == "alice") pending else emptyMap()
+
+        override fun setPending(
+            profileId: String,
+            pending: Map<String, Set<String>>,
+        ) = Unit
+
+        override fun confirmed(profileId: String) = if (profileId == "alice") confirmed else emptyMap()
+    }
 
     @Test fun onlyAChangedTelemetryChoiceTriggersItsSync() =
         runBlocking {

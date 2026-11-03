@@ -6,14 +6,19 @@ import android.app.job.JobScheduler
 import android.app.job.JobService
 import android.content.ComponentName
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Build
 import android.os.PersistableBundle
 import eu.advantly.android.BuildConfig
 import eu.advantly.android.auth.PhoneSyncRecord
 import eu.advantly.android.auth.PhoneSyncScheduler
+import eu.advantly.android.auth.refreshMatchVisitors
 import eu.advantly.android.auth.runScheduledSync
+import eu.advantly.core.model.MatchId
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.data.AndroidInstallationGuard
+import eu.advantly.data.LocalData
+import eu.advantly.match.session.ActiveMatch
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.SessionListener
 import eu.advantly.match.session.SessionState
@@ -141,6 +146,7 @@ internal class AndroidPhoneSyncRecord(
             .remove("last_backup.$profile")
             .remove("failures.$profile")
             .remove("visitors.pending.$profile")
+            .remove("visitors.confirmed.$profile")
             .remove("scorers.pending.$profile")
             .remove("scorers.accepted.$profile")
             // Altlast bis 0.5.x (Live-Upload nur mit Zuschauern); wird nicht mehr geschrieben.
@@ -148,21 +154,42 @@ internal class AndroidPhoneSyncRecord(
             .apply()
     }
 
-    // Zuschauer (F16): vorgemerkte Benennungen als „Match/Profil“, beides UUIDs ohne Schrägstrich.
-    override fun pending(profileId: String): Map<String, Set<String>> =
+    // Zuschauer (F16): vorgemerkte und bestätigte Benennungen als „Match/Profil“, beides UUIDs ohne Schrägstrich.
+    override fun pending(profileId: String) = visitors("visitors.pending.$profileId")
+
+    override fun setPending(
+        profileId: String,
+        pending: Map<String, Set<String>>,
+    ) = setVisitors("visitors.pending.$profileId", pending)
+
+    override fun confirmed(profileId: String) = visitors("visitors.confirmed.$profileId")
+
+    override fun setConfirmed(
+        profileId: String,
+        confirmed: Map<String, Set<String>>,
+    ) = setVisitors("visitors.confirmed.$profileId", confirmed)
+
+    private fun visitors(key: String): Map<String, Set<String>> =
         prefs
-            .getStringSet("visitors.pending.$profileId", null)
+            .getStringSet(key, null)
             .orEmpty()
             .mapNotNull { entry -> entry.split('/').takeIf { it.size == 2 }?.let { it[0] to it[1] } }
             .groupBy({ it.first }, { it.second })
             .mapValues { it.value.toSet() }
 
-    override fun setPending(
-        profileId: String,
-        pending: Map<String, Set<String>>,
+    private fun setVisitors(
+        key: String,
+        visitors: Map<String, Set<String>>,
     ) {
-        val entries = pending.flatMap { (match, visitors) -> visitors.map { "$match/$it" } }.toSet()
-        prefs.edit().putStringSet("visitors.pending.$profileId", entries).apply()
+        val entries = visitors.flatMap { (match, ids) -> ids.map { "$match/$it" } }.toSet()
+        prefs.edit().putStringSet(key, entries).apply()
+    }
+
+    /** Meldet (auf Main) jede Änderung vorgemerkter oder bestätigter Zuschauer, auch aus anderen Instanzen; Rückgabe meldet ab. */
+    fun onVisitorsChanged(changed: () -> Unit): () -> Unit {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key -> if (key?.startsWith("visitors.") == true) changed() }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        return { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
 
     // Zählen weitergeben (§3.4): „Match/Profil/0|1“ (1 = am Server), nach der Abgabe zusätzlich „/Event/von/an“ (wartet
@@ -230,7 +257,7 @@ internal class AndroidPhoneSyncRecord(
  * da ist. Nur mit lokalem Konto; der Auftrag läuft ausschließlich für dieses Konto. Ebenso eine geänderte
  * Telemetrie-Wahl (H0, auch von der Uhr): der Lauf bringt sie ins Konto. Und der Live-Stand ([onLiveScore]): Punkte
  * der Uhr kommen auch ohne Activity und ohne Konto-Host über den Listener-Service herein; läuft die Live-Übertragung
- * ([onLiveRelay]), lädt sie direkt hoch, sonst ein (Expedited) Job.
+ * ([LiveRelay]), lädt sie direkt hoch, sonst ein (Expedited) Job.
  */
 internal fun scheduleSyncAfterMatchEnd(
     context: Context,
@@ -250,7 +277,19 @@ internal fun scheduleSyncAfterMatchEnd(
         profile()?.let { scheduler.scheduleAfterMatchEnd(it, record) }
         Unit
     }
-    val removeMatch = onMatchFinished(session, schedule)
+    val removeMatch =
+        onMatchFinished(session) {
+            schedule()
+            // Bestätigte Zuschauer braucht nur die Live-Übertragung: beendete Matches austragen. Irrt sich das (Match nur
+            // geschlossen), holt die Server-Abfrage im nächsten Vordergrund die Liste zurück.
+            profile()?.let { account ->
+                val open =
+                    session.state.value.matches
+                        .filter { it.state.status != MatchStatus.FINISHED }
+                        .mapTo(HashSet()) { it.id.value }
+                record.setConfirmed(account, record.confirmed(account).filterKeys { it in open })
+            }
+        }
     val removeTelemetry = onTelemetryChanged(session, schedule)
     val live =
         LiveScoreUpload(System::currentTimeMillis, { account, delayMs ->
@@ -260,36 +299,94 @@ internal fun scheduleSyncAfterMatchEnd(
             }
         })
     val removeLive = onLiveScore(session, live, profile)
-    val removeRelay = onLiveRelay(session, { profile() != null }) { LiveRelayService.update(context, it) }
+    val relay =
+        LiveRelay(
+            session,
+            { profile() != null },
+            audience = { match ->
+                AndroidInstallationGuard.storage(context) {
+                    val account = session.data.accountIdentities.profile
+                    account != null && hasLiveAudience(session.data, record, account, match)
+                } == true
+            },
+            lookup = { match -> profile()?.let { refreshMatchVisitors(context, session, it, match.id.value) } == true },
+        ) { LiveRelayService.update(context, it) }
+    val removeVisitors = record.onVisitorsChanged { relay.evaluate() }
+    LiveRelayService.foreground = relay::onForeground
     return {
         removeMatch()
         removeTelemetry()
         removeLive()
-        removeRelay()
+        removeVisitors()
+        LiveRelayService.foreground = null
+        relay.close()
         LiveRelayService.update(context, false)
     }
 }
 
+/** Publikum eines Matches: verknüpfte Mitspieler mit Konto (Lineup) oder vorgemerkte bzw. bestätigte Zuschauer. */
+internal fun hasLiveAudience(
+    data: LocalData,
+    visitors: PendingVisitorStore,
+    account: String,
+    match: ActiveMatch,
+): Boolean {
+    val id = match.id.value
+    return !visitors.pending(account)[id].isNullOrEmpty() ||
+        !visitors.confirmed(account)[id].isNullOrEmpty() ||
+        (match.lineup.a + match.lineup.b).any { data.players.friendProfile(account, it) != null }
+}
+
 /**
- * Live-Übertragung im Vordergrund ([LiveRelayService]): nach jedem Session-Zustand neu bewerten, ob die eigene Uhr ein
- * laufendes Match zählt ([liveRelayWanted]); [run] startet bzw. beendet den Dienst.
+ * Live-Übertragung im Vordergrund ([LiveRelayService]) nur mit Publikum ([audience]): angemeldet ([signedIn]), die eigene
+ * Uhr zählt ein laufendes (nicht pausiertes oder beendetes) Match, und es hat verknüpfte Mitspieler oder Zuschauer.
+ * Ohne Publikum lädt weiter der (Expedited) Job hoch. Neu bewertet nach jedem Session-Zustand, jeder Änderung der
+ * Zuschauerlisten ([evaluate]) und im Vordergrund ([onForeground]); [run] startet bzw. beendet den Dienst.
+ *
+ * Zuschauer, die ein anderes Gerät desselben Kontos oder der Ersteller benannt hat, kennt das Handy nur vom Server:
+ * Laufende Uhr-Matches ohne bekanntes Publikum gehen an [lookup] – je Match einmal, sobald es hochgeladen ist
+ * ([lookup] liefert bis dahin `false`), und erneut in jedem Vordergrund (nur dort darf der Dienst ohnehin starten).
+ * Aufrufe auf Main.
  */
-internal fun onLiveRelay(
-    session: MatchSession,
-    signedIn: () -> Boolean,
-    run: (Boolean) -> Unit,
-): () -> Unit {
-    val listener =
-        SessionListener { state ->
-            run(
-                liveRelayWanted(signedIn(), state.matches) {
-                    // Uhr zählt: eines meiner Geräte (auch „Meine Uhr“ vor ihrer Meldung), aber nicht dieses Handy
-                    !it.isScorer && session.scoresHere(it.id)
-                },
-            )
-        }
-    session.addListener(listener)
-    return { session.removeListener(listener) }
+internal class LiveRelay(
+    private val session: MatchSession,
+    private val signedIn: () -> Boolean,
+    private val audience: (ActiveMatch) -> Boolean,
+    private val lookup: (ActiveMatch) -> Boolean,
+    private val run: (Boolean) -> Unit,
+) {
+    private val asked = HashSet<MatchId>()
+    private val listener = SessionListener { evaluate(it) }
+
+    init {
+        session.addListener(listener)
+    }
+
+    fun evaluate(state: SessionState = session.state.value) {
+        val live =
+            if (signedIn()) {
+                // Uhr zählt: eines meiner Geräte (auch „Meine Uhr“ vor ihrer Meldung), aber nicht dieses Handy
+                state.matches.filter { it.state.status in RELAY_STATUSES && !it.isScorer && session.scoresHere(it.id) }
+            } else {
+                emptyList()
+            }
+        asked.retainAll(live.mapTo(HashSet()) { it.id })
+        val (heard, silent) = live.partition(audience)
+        silent.forEach { if (it.id !in asked && lookup(it)) asked += it.id }
+        run(heard.isNotEmpty())
+    }
+
+    /** App im Vordergrund: Matches ohne bekanntes Publikum erneut beim Server erfragen. */
+    fun onForeground() {
+        asked.clear()
+        evaluate()
+    }
+
+    fun close() = session.removeListener(listener)
+
+    private companion object {
+        val RELAY_STATUSES = setOf(MatchStatus.IN_PROGRESS, MatchStatus.AWAITING_DECISION)
+    }
 }
 
 /**

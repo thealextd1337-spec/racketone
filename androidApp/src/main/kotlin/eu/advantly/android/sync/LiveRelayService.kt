@@ -17,8 +17,6 @@ import android.os.PowerManager
 import eu.advantly.android.MainActivity
 import eu.advantly.android.R
 import eu.advantly.android.auth.runScheduledSync
-import eu.advantly.core.scoring.MatchStatus
-import eu.advantly.match.session.ActiveMatch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -26,22 +24,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
- * Braucht es die Live-Übertragung (plan-live-mitspieler §3.1, Doze)? Angemeldet und die eigene Uhr zählt ein laufendes
- * (nicht pausiertes oder beendetes) Match. Ohne Bedingung auf Publikum: Hochgeladen wird jedes laufende Match ohnehin
- * ([onLiveScore]), und Zuschauer kommen meist erst während des Matches direkt am Server dazu – bestätigte kennt das
- * Handy nicht, eine Publikumsprüfung verpasste sie also.
- */
-internal fun liveRelayWanted(
-    signedIn: Boolean,
-    matches: List<ActiveMatch>,
-    watchScores: (ActiveMatch) -> Boolean,
-) = signedIn && matches.any { it.state.status in RELAY_STATUSES && watchScores(it) }
-
-private val RELAY_STATUSES = setOf(MatchStatus.IN_PROGRESS, MatchStatus.AWAITING_DECISION)
-
-/**
  * Vordergrunddienst (Typ `connectedDevice`) „Live-Stand wird übertragen“, solange die eigene Uhr ein laufendes Match
- * zählt ([liveRelayWanted]): Im Doze sind Netz und Jobs gesperrt, Expedited Jobs haben nur eine kleine Tagesquote. Ein
+ * mit Publikum zählt ([LiveRelay]): Im Doze sind Netz und Jobs gesperrt, Expedited Jobs haben nur eine kleine Tagesquote. Ein
  * Prozess mit Vordergrunddienst hat Netz und Wakelocks auch im Doze; der Upload läuft deshalb direkt hier statt über
  * JobScheduler.
  *
@@ -174,10 +158,21 @@ class LiveRelayService : Service() {
             }
         }
 
-        /** App im Vordergrund (Activity `ON_START`): Ein zuvor verbotener Start darf jetzt gelingen. */
+        /** Neu bewerten im Vordergrund ([LiveRelay.onForeground]); gesetzt, solange die Session-Beobachter laufen. */
+        internal var foreground: (() -> Unit)? = null
+
+        /**
+         * App im Vordergrund (Activity `ON_START`): Ein zuvor verbotener Start darf jetzt gelingen; inzwischen benannte
+         * Zuschauer fragt [foreground] beim Server nach.
+         */
         fun onForeground(context: Context) {
             startBlocked = false
-            if (wanted) update(context, true)
+            val evaluate = foreground
+            if (evaluate != null) {
+                evaluate()
+            } else if (wanted) {
+                update(context, true)
+            }
         }
 
         /** Upload über den laufenden Dienst; `false`: kein Dienst, der Aufrufer plant einen Job. */

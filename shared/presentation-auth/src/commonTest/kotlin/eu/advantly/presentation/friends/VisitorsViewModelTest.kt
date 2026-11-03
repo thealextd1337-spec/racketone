@@ -62,6 +62,17 @@ internal class MemoryVisitorStore : PendingVisitorStore {
     ) {
         this.pending[profileId] = pending
     }
+
+    val confirmed = mutableMapOf<String, Map<String, Set<String>>>()
+
+    override fun confirmed(profileId: String) = confirmed[profileId].orEmpty()
+
+    override fun setConfirmed(
+        profileId: String,
+        confirmed: Map<String, Set<String>>,
+    ) {
+        this.confirmed[profileId] = confirmed
+    }
 }
 
 internal class FakeVisitors : VisitorsPort {
@@ -185,6 +196,41 @@ class VisitorsViewModelTest {
             assertEquals(listOf("carol"), state.visitors?.visitors?.map { it.profileId })
         }
 
+    /** Live-Übertragung (Android): Bestätigte Zuschauer merkt sich das Gerät – benannt, vom Server gelesen, widerrufen. */
+    @Test fun confirmedVisitorsFollowAddsListsAndRevokes() =
+        fixture {
+            onServer += "m1"
+            port.visitors["m1"] = mutableListOf(MatchVisitor("carol", "Carol", "bob", canRevoke = true))
+            model.openVisitors("m1")
+            assertEquals(setOf("carol"), queue.confirmed("alice", "m1"), "auf einem anderen Gerät benannt")
+            model.addVisitors(setOf("vera"))
+            assertEquals(setOf("carol", "vera"), queue.confirmed("alice", "m1"))
+            model.removeVisitor("vera")
+            model.removeVisitor("carol")
+            assertEquals(emptyMap(), store.confirmed("alice"), "kein Zuschauer mehr: Eintrag entfällt")
+
+            port.failures["vera"] = CloudException("visitor_must_be_friend", true)
+            model.addVisitors(setOf("vera"))
+            assertEquals(emptySet(), queue.confirmed("alice", "m1"), "abgelehnt: nicht bestätigt")
+        }
+
+    @Test fun refreshConfirmedReadsTheServerOnlyForUploadedMatches(): Unit =
+        runBlocking {
+            val port = FakeVisitors()
+            val store = MemoryVisitorStore()
+            val onServer = mutableSetOf<String>()
+            val queue = VisitorQueue(store, port, { _, match -> match in onServer }) {}
+            port.visitors["m1"] = mutableListOf(MatchVisitor("carol", "Carol", "alice", true))
+            queue.refreshConfirmed("alice", "m1")
+            assertTrue(port.calls.isEmpty(), "nicht hochgeladen: keine Abfrage")
+            onServer += "m1"
+            queue.refreshConfirmed("alice", "m1")
+            assertEquals(setOf("carol"), queue.confirmed("alice", "m1"))
+            port.visitors["m1"]!!.clear()
+            queue.refreshConfirmed("alice", "m1")
+            assertEquals(emptyMap(), store.confirmed("alice"))
+        }
+
     @Test fun serverErrorsStayInTheVisitorSectionNotTheFriendsTab() =
         fixture {
             onServer += "m1"
@@ -286,6 +332,7 @@ class VisitorsViewModelTest {
             port.failures["eve"] = CloudException("cloud_connection_failed", false) // offline
             assertFalse(queue.flush("alice"))
             assertEquals(mapOf("m1" to setOf("eve")), store.pending("alice"))
+            assertEquals(emptyMap(), store.confirmed("alice"), "abgelehnt oder offen: nicht bestätigt")
 
             port.failures.remove("eve")
             port.failures["eve"] = CloudException("rate_limit_exceeded", true)
@@ -295,6 +342,7 @@ class VisitorsViewModelTest {
             port.failures.clear()
             assertTrue(queue.flush("alice"))
             assertTrue(store.pending("alice").isEmpty())
+            assertEquals(mapOf("m1" to setOf("eve")), store.confirmed("alice"), "gesendet: bestätigt")
         }
 
     @Test fun permissionFailureDropsOnlyAfterRepeatedAttempts(): Unit =

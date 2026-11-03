@@ -7,6 +7,7 @@ import android.app.job.JobParameters
 import android.app.job.JobScheduler
 import android.content.ComponentName
 import android.content.Context
+import android.os.Looper
 import android.os.PersistableBundle
 import eu.advantly.android.UnsupportedDirectorySyncLinux
 import eu.advantly.presentation.friends.AcceptIssue
@@ -100,15 +101,29 @@ class PhoneSyncJobsTest {
         assertEquals(setOf("last_backup.bob", "failures.bob"), prefs.all.keys)
     }
 
-    /** Zuschauer: vorgemerkte Benennungen je Konto, Logout entfernt sie. */
+    /**
+     * Zuschauer: vorgemerkte und bestätigte Benennungen je Konto, Logout entfernt sie. Jede Änderung meldet sich (auch aus
+     * einer anderen Instanz), damit die Live-Übertragung neu bewertet.
+     */
     @Test fun visitorQueueSurvivesReopenAndIsForgottenWithTheAccount() {
         val record = AndroidPhoneSyncRecord(app)
+        var changes = 0
+        val unsubscribe = AndroidPhoneSyncRecord(app).onVisitorsChanged { changes++ }
         record.setPending("alice", mapOf("m1" to setOf("vera", "carol"), "m2" to setOf("dora")))
+        record.setConfirmed("alice", mapOf("m3" to setOf("carol")))
         record.setPending("bob", mapOf("m9" to setOf("eve")))
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(3, changes)
+        record.save("alice", 1_000, 0)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals("kein Zuschauer-Schlüssel", 3, changes)
+        unsubscribe()
         val reopened = AndroidPhoneSyncRecord(app)
         assertEquals(mapOf("m1" to setOf("vera", "carol"), "m2" to setOf("dora")), reopened.pending("alice"))
+        assertEquals(mapOf("m3" to setOf("carol")), reopened.confirmed("alice"))
         record.forget("alice")
         assertEquals(emptyMap<String, Set<String>>(), reopened.pending("alice"))
+        assertEquals(emptyMap<String, Set<String>>(), reopened.confirmed("alice"))
         assertEquals(mapOf("m9" to setOf("eve")), reopened.pending("bob"))
     }
 
@@ -237,7 +252,20 @@ class PhoneSyncJobsTest {
             LiveRelayService.update(app, false)
             LiveRelayService.onForeground(app)
             assertEquals("nicht mehr gebraucht: kein Start", 2, starts)
+
+            // Mit Session-Beobachtern bewertet der Vordergrund das Publikum neu (Zuschauer kam dazu): jetzt Start.
+            var evaluated = 0
+            LiveRelayService.foreground = {
+                evaluated++
+                LiveRelayService.update(app, true)
+            }
+            LiveRelayService.update(app, true)
+            LiveRelayService.onForeground(app)
+            assertEquals(1, evaluated)
+            assertEquals(4, starts)
+            LiveRelayService.update(app, false)
         } finally {
+            LiveRelayService.foreground = null
             LiveRelayService.start = original
             LiveRelayService.onForeground(app) // Sperre für andere Tests lösen (nicht gewünscht: kein Start)
         }

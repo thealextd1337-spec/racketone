@@ -285,6 +285,7 @@ class FriendsViewModel(
             val onServer = queue.isOnServer(session.profileId, id)
             val confirmed = if (onServer) queue.port.matchVisitors(session.profileId, id) else emptyList()
             current(session)
+            if (onServer) queue.setConfirmed(session.profileId, id, confirmed.mapTo(HashSet()) { it.profileId })
             if (visitorMatch != id) return@quiet
             val entries = confirmed.map { VisitorEntry(it.profileId, it.alias, it.canRevoke) }
             show { copy(visitors = localVisitors(session.profileId, id, entries)) }
@@ -308,7 +309,10 @@ class FriendsViewModel(
         }
         quiet({ error -> show { copy(visitors = visitors?.takeIf { it.matchId == id }?.copy(error = error)) } }) { session ->
             try {
-                profileIds.forEach { queue.port.addVisitor(session.profileId, id, it) }
+                profileIds.forEach {
+                    queue.port.addVisitor(session.profileId, id, it)
+                    queue.setConfirmed(session.profileId, id, queue.confirmed(session.profileId, id) + it)
+                }
                 current(session)
             } finally {
                 if (visitorMatch == id && started(session)) loadVisitors()
@@ -335,6 +339,7 @@ class FriendsViewModel(
         dismissVisitorError()
         quiet({ error -> show { copy(visitors = visitors?.takeIf { it.matchId == id }?.copy(error = error)) } }) { session ->
             queue.port.revokeVisitor(session.profileId, id, profileId)
+            queue.setConfirmed(session.profileId, id, queue.confirmed(session.profileId, id) - profileId)
             current(session)
             if (visitorMatch == id) loadVisitors()
         }

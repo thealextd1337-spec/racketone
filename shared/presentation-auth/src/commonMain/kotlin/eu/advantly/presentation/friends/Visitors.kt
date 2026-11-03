@@ -22,6 +22,17 @@ interface PendingVisitorStore {
         profileId: String,
         pending: Map<String, Set<String>>,
     )
+
+    /**
+     * Bestätigte Zuschauer: Match-ID → Profil-IDs, die dieses Gerät erfolgreich benannt oder vom Server gelesen hat.
+     * Entscheidet mit über die Live-Übertragung im Vordergrund (Android); ohne Host-Speicher bleibt sie leer.
+     */
+    fun confirmed(profileId: String): Map<String, Set<String>> = emptyMap()
+
+    fun setConfirmed(
+        profileId: String,
+        confirmed: Map<String, Set<String>>,
+    ) = Unit
 }
 
 /**
@@ -59,6 +70,31 @@ class VisitorQueue(
         requestSync()
     }
 
+    fun confirmed(
+        profileId: String,
+        matchId: String,
+    ): Set<String> = store.confirmed(profileId)[matchId].orEmpty()
+
+    /** Bestätigte Zuschauer von [matchId] ersetzen (leer: Eintrag entfällt). */
+    fun setConfirmed(
+        profileId: String,
+        matchId: String,
+        visitorIds: Set<String>,
+    ) {
+        val all = store.confirmed(profileId)
+        if (all[matchId].orEmpty() == visitorIds) return
+        store.setConfirmed(profileId, if (visitorIds.isEmpty()) all - matchId else all + (matchId to visitorIds))
+    }
+
+    /** Bestätigte Zuschauer vom Server übernehmen, auch auf einem anderen Gerät benannte; nur hochgeladene Matches. */
+    suspend fun refreshConfirmed(
+        profileId: String,
+        matchId: String,
+    ) {
+        if (!onServer(profileId, matchId)) return
+        setConfirmed(profileId, matchId, port.matchVisitors(profileId, matchId).mapTo(HashSet()) { it.profileId })
+    }
+
     /** Vorgemerkte Benennung zurücknehmen (noch nichts gesendet). */
     fun forget(
         profileId: String,
@@ -80,6 +116,8 @@ class VisitorQueue(
                     try {
                         port.addVisitor(profileId, matchId, visitorId)
                         added = true
+                        // Vor dem Austragen aus der Vormerkung: Das Publikum bleibt ohne Lücke bekannt.
+                        setConfirmed(profileId, matchId, confirmed(profileId, matchId) + visitorId)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: CloudException) {
