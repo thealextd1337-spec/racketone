@@ -61,9 +61,11 @@ data class CloudPlayer(
     val deleted: Boolean,
 )
 
+/** [finalRejected]: endgültig abgelehnte Events des Matches – sie fehlen am Server und zählen nicht zur Event-Anzahl. */
 data class CloudProjection(
     val matchId: String,
     val status: String,
     val scoreJson: String,
     val createdAtMs: Long,
+    val finalRejected: Int = 0,
 )

@@ -54,6 +54,13 @@ data class ScoreSummary(
     val eventCount: Int = 0,
     /** Ergebnis nach Matchende manuell korrigiert (`MatchResult.corrected`, Protokoll 5). */
     val corrected: Boolean = false,
+    /** Aufschlagende Side im laufenden Spiel (Live-Stand); `null` beendet bzw. unbekannt. */
+    val serving: Side? = null,
+    /**
+     * Live-Stand (plan-live-mitspieler §8): Zähler beim Schreiben erreichbar (dieses Gerät zählt oder der Zähler ist
+     * verbunden); `null` = unbekannt (z. B. nur gezogene Events).
+     */
+    val scorerConnected: Boolean? = null,
 ) {
     companion object {
         val EMPTY: ScoreSummary = ScoreSummary()
@@ -99,6 +106,7 @@ data class ScoreSummary(
                 completedSets = state.sets,
                 currentState = state.current,
                 corrected = state.result?.corrected == true,
+                serving = state.serve?.side,
             )
     }
 }

@@ -3,6 +3,8 @@ package eu.advantly.android
 import eu.advantly.device.link.WearDataLayerTransport
 import eu.advantly.sync.protocol.LiveTelemetry
 import eu.advantly.sync.protocol.LiveTelemetrySubscription
+import eu.advantly.sync.protocol.LiveViewSubscription
+import eu.advantly.sync.protocol.LiveViews
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -63,6 +65,7 @@ class ManifestTest {
         assertEquals("/advantly/telemetry/live", LiveTelemetry.MESSAGE_PATH)
         assertEquals("/advantly/telemetry/subscribe", LiveTelemetrySubscription.MESSAGE_PATH)
         assertTrue(messages.any { it.getAttributeNS(android, "path") == LiveTelemetry.MESSAGE_PATH })
+        assertTrue(messages.any { it.getAttributeNS(android, "path") == LiveViewSubscription.MESSAGE_PATH })
         assertTrue(dataItems.all { it.getAttributeNS(android, "pathPrefix") == WearDataLayerTransport.QUEUE_PREFIX })
     }
 
@@ -83,6 +86,8 @@ class ManifestTest {
             assertEquals(rules, excluded.split("advantly_auth.xml").size, excluded.split("watch_install.xml").size)
             // Die Startbildschirm-Wahl gehört zu diesem Gerät: die Anmeldung wird ja auch nicht übertragen.
             assertEquals(rules, excluded.split("advantly_auth.xml").size, excluded.split("start_login.xml").size)
+            // Push-Zustimmung und hochgeladenes Token gehören zu diesem Gerät.
+            assertEquals(rules, excluded.split("advantly_auth.xml").size, excluded.split("advantly_push.xml").size)
         }
         // Matches und Pulsverläufe (alle Datenbankfamilien der Recovery) gehen auf Handy und Uhr nicht in Googles Backup.
         for (app in listOf("", "../wearApp/")) {
@@ -115,6 +120,24 @@ class ManifestTest {
                         "com.google.android.gms.wearable.MESSAGE_RECEIVED"
                 }.map { (it.getElementsByTagName("data").item(0) as Element).getAttributeNS(android, "path") }
         assertTrue(paths.contains(LiveTelemetrySubscription.MESSAGE_PATH))
+        assertTrue(paths.contains(LiveViews.MESSAGE_PATH))
         assertTrue(paths.contains(WearDataLayerTransport.MESSAGE_PATH))
+    }
+
+    /** Push (Plan Live §3.3): kein Token vor der Einwilligung, keine Analytics, Firebase nur manuell, Dienst nicht exportiert. */
+    @Test
+    fun pushHasNoAutoInitNoAnalyticsAndAPrivateService() {
+        val service = elements("service").single { it.getAttributeNS(android, "name") == ".push.AdvantlyMessagingService" }
+        assertEquals("false", service.getAttributeNS(android, "exported"))
+        assertEquals(
+            "com.google.firebase.MESSAGING_EVENT",
+            (service.getElementsByTagName("action").item(0) as Element).getAttributeNS(android, "name"),
+        )
+        val meta = elements("meta-data").associate { it.getAttributeNS(android, "name") to it.getAttributeNS(android, "value") }
+        assertEquals("false", meta["firebase_messaging_auto_init_enabled"])
+        assertEquals("true", meta["firebase_analytics_collection_deactivated"])
+        val init = elements("provider").single { it.getAttributeNS(android, "name") == "com.google.firebase.provider.FirebaseInitProvider" }
+        assertEquals("remove", init.getAttributeNS("http://schemas.android.com/tools", "node"))
+        assertTrue(elements("uses-permission").any { it.getAttributeNS(android, "name") == "android.permission.POST_NOTIFICATIONS" })
     }
 }

@@ -127,6 +127,13 @@ data class ActiveMatch(
     val awaitingServerChoice: Boolean get() = state.serverChoice?.let { it.chosen == null } == true
 }
 
+/** Abgabe des Zählens ([MatchSession.handOverScoring]): `ScorerChanged` [eventId] von [from] (eigenes Gerät) an [to]. */
+data class ScorerHandover(
+    val eventId: EventId,
+    val from: DeviceId,
+    val to: DeviceId,
+)
+
 /** Verworfene eigene Eingaben ([count] insgesamt) im nicht offenen Match [matchId]. */
 data class DroppedInputs(
     val matchId: MatchId,

@@ -17,13 +17,17 @@ interface DocumentFiles {
 
     /**
      * Liest eine gewählte Datei, höchstens [maxBytes] + 1 Byte (so erkennt der Aufrufer „zu groß“, ohne alles zu laden).
-     * [onDone]: Inhalt, Fehlschlag bei Lese- oder Berechtigungsfehler (kein Urteil über den Inhalt), `null` abgebrochen.
+     * [onDone]: Inhalt, Fehlschlag bei Lese- oder Berechtigungsfehler (kein Urteil über den Inhalt) bzw.
+     * [FileTooLargeException], wenn die Größe schon vor dem Lesen bekannt ist; `null` abgebrochen.
      */
     fun open(
         maxBytes: Int,
         onDone: (Result<ByteArray>?) -> Unit,
     )
 }
+
+/** Die gewählte Datei ist laut Dateisystem größer als erlaubt; gelesen wurde nichts. */
+class FileTooLargeException : Exception("Datei zu groß")
 
 /** `null`, wo es keine Dateiauswahl gibt (Desktop-Preview). */
 @Composable

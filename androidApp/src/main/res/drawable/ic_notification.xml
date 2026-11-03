@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Benachrichtigungs-Symbol: das „A“ aus ic_launcher_foreground, einfarbig und auf 24 dp zugeschnitten. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <group
+        android:translateX="-30"
+        android:translateY="-30">
+        <path
+            android:fillColor="#FFFFFF"
+            android:fillType="evenOdd"
+            android:pathData="M38,74 L50,34 L58,34 L70,74 L62,74 L59.3,65 L48.7,65 L46,74 Z M50.5,58 L57.5,58 L54,46 Z" />
+    </group>
+</vector>

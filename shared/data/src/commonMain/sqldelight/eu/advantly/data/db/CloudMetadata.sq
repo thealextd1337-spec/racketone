@@ -130,9 +130,12 @@ AND NOT EXISTS (SELECT 1 FROM match_tombstone t WHERE t.match_id = m.entity_id A
 -- Nur tatsächlich abbildbare Einheiten zählen zum Limit; ihr Ack-Stand bleibt bei Ausschluss unverändert.
 AND ((m.kind = 'PLAYER' AND EXISTS (SELECT 1 FROM player p WHERE p.id = m.entity_id AND p.kind NOT IN ('PLACEHOLDER', 'FRIEND')))
     OR (m.kind IN ('HEADER', 'PARTICIPANTS', 'PROJECTION') AND EXISTS (SELECT 1 FROM match_header h WHERE h.id = m.entity_id)))
--- Wie beim Upload-Mapping darf eine Projektion keinen außerhalb dieser Auswahl ausstehenden Events vorauslaufen.
+-- Wie beim Upload-Mapping darf eine Projektion keinen außerhalb dieser Auswahl ausstehenden Events vorauslaufen
+-- (endgültig abgelehnte zählen nicht als ausstehend, siehe CloudUpload.outstandingForMatch).
 AND (m.kind != 'PROJECTION' OR NOT EXISTS (
-    SELECT 1 FROM match_event e WHERE e.match_id = m.entity_id AND e.cloud_state != 1 AND e.id NOT IN :selectedEventIds
+    SELECT 1 FROM match_event e WHERE e.match_id = m.entity_id
+      AND (e.cloud_state = 0 OR (e.cloud_state = 2 AND e.cloud_rejection = 'device_not_owned'))
+      AND e.id NOT IN :selectedEventIds
 ))
 -- Global redigierte Identitäten werden nie hochgeladen und belegen daher keinen Platz im Limit.
 AND (m.kind != 'PLAYER' OR NOT EXISTS (SELECT 1 FROM replica_redacted_player r WHERE r.player_id = m.entity_id))

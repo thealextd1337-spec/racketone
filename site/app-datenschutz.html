@@ -13,7 +13,7 @@
 </head>
 <body>
   <!--
-    Datenschutzerklärung der Apps, Stand 0.5.1 (Konto erforderlich, automatische Cloud-Sicherung, Zuschauer, Pulsverlauf nur lokal mit Datei-Export). Diese URL ist in der Google Play Console
+    Datenschutzerklärung der Apps, Stand 0.6.0 (Konto erforderlich, automatische Cloud-Sicherung, Zuschauer, Live für Mitspieler, Zählen weitergeben, Push, Pulsverlauf nur lokal). Diese URL ist in der Google Play Console
     als Datenschutz-URL und in private.consent_translations als PRIVACY-Dokument hinterlegt – Pfad nicht ändern.
     Jede inhaltliche Änderung braucht eine neue Fassung im Zustimmungskatalog (docs/support-admin-betrieb.md).
     Englische Fassung: en/app-privacy.html (inhaltlich synchron halten).
@@ -119,10 +119,21 @@
         <li><strong>Matches teilen:</strong> Pro Match entscheiden Sie, ob Ihre Freunde es sehen („Mit Freunden teilen“, standardmäßig aus; den Standard können Sie unter Profil ändern). Freunde sehen dann eine eingeschränkte Ansicht mit Sportart, Datum, Spielstand, Angaben zum Match wie Belag oder Halle und den Anzeigenamen der Teilnehmenden – ohne Geräteangaben und ohne Puls oder Schritte. Teilt ein eingetragener Mitspieler das Match, sehen auch seine Freunde diese Ansicht. Ausblenden oder das Teilen beenden ist jederzeit möglich.</li>
         <li><strong>Freunde als Mitspieler:</strong> Tragen Sie einen Freund in ein Match ein, wird das Match mit seinem Konto verknüpft und erscheint auch in seinem Verlauf; eingetragene Mitspieler sehen die Anzeigenamen aller Teilnehmenden. Mit „War ich nicht“ kann er der Verknüpfung widersprechen; das Match verschwindet dann aus seiner Sicht.</li>
         <li><strong>Zuschauer:</strong> Ersteller und eingetragene Mitspieler können eigene Freunde als Zuschauer eines Matches benennen – beim Start oder später; die übrigen Mitspieler müssen nicht zustimmen. Zuschauer sehen unter „Ich schaue zu“ den laufenden Spielstand, das Ergebnis, Sportart, Status sowie die Anzeigenamen der Teilnehmenden – ohne Geräteangaben, ohne einzelne Spielereignisse und ohne Puls oder Schritte. Eingetragene Mitspieler sehen außerdem die Anzeigenamen der Zuschauer. Damit Zuschauer den Stand während des Spiels sehen, überträgt die Handy-App bei Matches mit Zuschauern den aktuellen Spielstand schon während des Matches (höchstens etwa alle 30 Sekunden) in unsere Cloud. Die Zuschauerrolle gilt, bis sie beendet wird: durch den, der sie vergeben hat, den Ersteller des Matches oder den Zuschauer selbst („Nicht mehr zuschauen“); Entfreunden oder Blockieren beendet sie automatisch.</li>
+        <li><strong>Live für Mitspieler:</strong> Während Sie ein Match zählen, überträgt die Handy-App den aktuellen Spielstand etwa alle 10 Sekunden in unsere Cloud. Eingetragene Mitspieler mit Konto und von Ihnen benannte Zuschauer sehen ihn unter „Live“ auf ihrem Handy und auf ihrer Wear-OS-Uhr: Sportart, Spielstand, Sätze, Aufschlag und die Anzeigenamen der Teilnehmenden – ohne Puls, Schritte oder Geräteangaben. Wer Sie blockiert hat oder von Ihnen blockiert wurde, sieht nichts.</li>
+        <li><strong>Zählen weitergeben:</strong> Als Ersteller eines Matches können Sie das Zählen an einen eingetragenen Mitspieler weitergeben. Nimmt er an, zählt ab dann sein Handy oder seine Uhr; dafür speichern wir, welches seiner Geräte die Rolle übernommen hat. Sie können die Rolle jederzeit zurücknehmen; Entfreunden oder Blockieren beendet sie automatisch.</li>
       </ul>
       <p>Rechtsgrundlage ist Art. 6 Abs. 1 lit. b DSGVO (die von Ihnen genutzten Freundes- und Teilen-Funktionen). Wenn Sie Freunde in Matches eintragen, geschieht das zusätzlich in Ihrem berechtigten Interesse, Ihre Spiele gemeinsam zu dokumentieren (Art. 6 Abs. 1 lit. f DSGVO).</p>
 
-      <h3>4.4 Sicherheit, Protokolle und Missbrauchsschutz</h3>
+      <h3>4.4 Push-Benachrichtigungen (optional)</h3>
+      <p>Wenn Sie unter Profil → „Benachrichtigungen“ Push-Benachrichtigungen einschalten und die Android-Berechtigung erteilen, benachrichtigt Sie die App z. B. über Freundschaftsanfragen, wenn Sie in ein laufendes Match eingetragen oder als Zuschauer eingeladen werden oder wenn Sie zählen sollen bzw. der Zähler gewechselt hat. Standardmäßig ist das aus.</p>
+      <ul>
+        <li><strong>Was verarbeitet wird:</strong> ein Registrierungs-Token von Firebase Cloud Messaging (FCM) und eine Firebase-Installationskennung Ihres Handys. Das Token speichern wir zu Ihrem Gerät. Die Nachricht selbst enthält nur die Art des Ereignisses und technische Kennungen (z. B. Match- und Profil-ID) – keine Namen, keine Spielstände und keine Gesundheitsdaten. Den lesbaren Text erzeugt erst die App auf Ihrem Handy.</li>
+        <li><strong>Empfänger:</strong> Google Ireland Limited bzw. Google LLC (Firebase Cloud Messaging) als Auftragsverarbeiter für die Zustellung. Google Analytics und andere Firebase-Dienste nutzen wir nicht.</li>
+        <li><strong>Speicherdauer:</strong> Das Token löschen wir, wenn Sie Benachrichtigungen ausschalten, sich abmelden, das Gerät entfernen oder Ihr Konto löschen, spätestens nach 180 Tagen ohne Nutzung. Zu versendende Benachrichtigungen löschen wir nach der Zustellung, spätestens nach 7 Tagen.</li>
+      </ul>
+      <p>Rechtsgrundlage ist Ihre Einwilligung (Art. 6 Abs. 1 lit. a DSGVO), die Sie mit dem Schalter erteilen und jederzeit durch Ausschalten widerrufen können.</p>
+
+      <h3>4.5 Sicherheit, Protokolle und Missbrauchsschutz</h3>
       <p>Alle Verbindungen sind per TLS verschlüsselt. Bei jedem Zugriff verarbeiten unsere Dienstleister technisch notwendige Verbindungsdaten wie IP-Adresse, Zeitpunkt und App-Kennung, um den Dienst bereitzustellen und gegen Angriffe zu schützen (Art. 6 Abs. 1 lit. f DSGVO). Supabase bewahrt diese Zugriffsprotokolle einen Tag auf, Cloudflare Sicherheitsereignisse bis zu 31 Tage, Resend Versandprotokolle und E-Mail-Inhalte 30 Tage.</p>
       <!-- Fristen laut Anbieterdoku, Abruf 27.10.2026: supabase.com/pricing (Log retention Free 1 Tag, Pro 7 Tage),
            developers.cloudflare.com/analytics/graphql-api/limits/, resend.com/docs/knowledge-base/account-quotas-and-limits.
@@ -137,9 +148,10 @@
       <ul>
         <li><strong>Supabase</strong> (Supabase Pte. Ltd., Singapur): Datenbank, Anmeldung und Dateispeicher. Die Daten liegen in einem Rechenzentrum von Amazon Web Services in Frankfurt am Main. Für Support- und Betriebszugriffe aus Drittländern gelten EU-Standardvertragsklauseln.</li>
         <li><strong>Cloudflare</strong> (Cloudflare, Inc., USA): vorgeschaltetes Netzwerk zum Schutz und zur Auslieferung sowie Betrieb unserer Verwaltungsoberfläche.</li>
+        <li><strong>Google</strong> (Google Ireland Limited, Irland; Google LLC, USA): Zustellung von Push-Benachrichtigungen über Firebase Cloud Messaging, nur wenn Sie sie eingeschaltet haben (Abschnitt 4.4).</li>
         <li><strong>Resend</strong> (Plus Five Five, Inc., USA): Versand der E-Mails mit Anmeldecodes. Der Versand erfolgt aus Irland; Versandprotokolle und E-Mail-Daten speichert Resend in den USA.</li>
       </ul>
-      <p>Cloudflare und Resend sind unter dem EU-US Data Privacy Framework zertifiziert; die Übermittlung in die USA stützt sich auf den Angemessenheitsbeschluss der EU-Kommission, hilfsweise auf EU-Standardvertragsklauseln. Die Verträge zur Auftragsverarbeitung sind Bestandteil der jeweiligen Nutzungsbedingungen der Anbieter.</p>
+      <p>Cloudflare, Resend und Google LLC sind unter dem EU-US Data Privacy Framework zertifiziert; die Übermittlung in die USA stützt sich auf den Angemessenheitsbeschluss der EU-Kommission, hilfsweise auf EU-Standardvertragsklauseln. Die Verträge zur Auftragsverarbeitung sind Bestandteil der jeweiligen Nutzungsbedingungen der Anbieter.</p>
       <!-- Quellen (Abruf 27.10.2026): supabase.com/terms §7(b) + /legal/dpa (Vertragspartner Singapur, SCCs, kein DPF),
            /legal/subprocessor-list (AWS), cloudflare.com/terms §6.1 + /dpa + /privacypolicy (DPF), resend.com/legal/dpa,
            /docs/dashboard/domains/regions (Daten in den USA unabhängig von der Versandregion).
@@ -189,7 +201,7 @@
       <p>Advantly befindet sich in Entwicklung. Wir ergänzen diese Erklärung, <strong>bevor</strong> neue Funktionen wie die Übertragung von Gesundheitsdaten in die Cloud oder ihr Teilen verfügbar werden. Bei wesentlichen Änderungen bitten wir Sie in der App erneut um Ihre Zustimmung. Gesundheitsdaten werden nur mit Ihrer gesonderten, ausdrücklichen Einwilligung gespeichert (Abschnitt 3.4).</p>
 
       <h2>14. Stand</h2>
-      <p>November 2026 (Version 8, Pulsverlauf-Export, Abfrage bei Anmeldung)</p>
+      <p>November 2026 (Version 9, Live für Mitspieler, Zählen weitergeben, Push-Benachrichtigungen)</p>
     </div>
   </main>
 

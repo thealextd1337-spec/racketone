@@ -240,6 +240,19 @@ Pfad: **Richtlinien → App-Inhalte**. Alle Punkte müssen vor dem geschlossenen
   update private.consent_versions set approved_at = now() where (document_type, version) = ('PRIVACY', '8');
   commit;
   ```
+  **0.6.0 (Datenschutzerklärung Version 9, Live für Mitspieler, Zählen weitergeben, Push):** nur PRIVACY wechselt. Reihenfolge:
+  Migrationen `20261102000100`–`0300` + Edge Function `push-dispatch` mit Secrets auf staging (Checkliste
+  `supabase/functions/push-dispatch/README.md`), Merge, Seite live, App ausrollen, dann freigeben.
+  ```sql
+  begin;
+  update private.consent_versions set is_current = false where document_type = 'PRIVACY' and is_current;
+  insert into private.consent_versions(document_type, version, is_current) values ('PRIVACY', '9', true);
+  insert into private.consent_translations(document_type, version, language, url) values
+    ('PRIVACY', '9', 'de', 'https://advantly.eu/app-datenschutz.html'),
+    ('PRIVACY', '9', 'en', 'https://advantly.eu/en/app-privacy.html');
+  update private.consent_versions set approved_at = now() where (document_type, version) = ('PRIVACY', '9');
+  commit;
+  ```
   Voraussetzung: Migration `20261018000200_consent_versions.sql` ist auf dem Projekt (Release-Gate).
 
 ### 6.2 App-Zugriff
@@ -340,6 +353,15 @@ optional?“ → **Nein**). Optional bleiben nur Support-Meldungen und die per H
   - Je Match geht nur die gewählte Stufe (`pulseVisibility` in `matches.meta`) in unsere Cloud – eine Präferenz ohne Messwerte.
   - Erst wenn der geparkte Cloud-Stand (`w9/puls-cloud-geparkt`) kommt, erneut prüfen.
 
+- **0.6.0 (Push, Live für Mitspieler):**
+  - „Geräte- oder andere IDs“: zusätzlich das FCM-Registrierungstoken bzw. die Firebase-Installations-ID. Erhoben ja,
+    geteilt nein (Google ist Auftragsverarbeiter), **optional** (nur mit eingeschalteten Benachrichtigungen), Zweck
+    App-Funktionen.
+  - Der Live-Spielstand für Mitspieler fällt unter die bestehenden Angaben (Fitnessinfo/App-Aktivität). Sichtbarkeit
+    für andere Nutzer der App ist kein „Teilen“ im Sinne von Play.
+  - `firebase-messaging` ist das erste eingebundene SDK. Ohne Analytics, Auto-Init aus. Den Eintrag im SDK-Index
+    abgleichen.
+
 ### 6.7 Erklärung zu Gesundheits-Apps (Health apps declaration)
 Alle veröffentlichten Apps auf Play müssen sie ausfüllen, ausdrücklich auch für geschlossene/offene Tests [P10]. Vor dem Pilot abschließen und bereits intern vorbereiten; die Quelle nennt interne Tests nicht ausdrücklich.
 Die Kategorie „Aktivität und Fitness“ umfasst ausdrücklich „tracking body vitals related to fitness (like heart rate)“ [P10].
@@ -363,6 +385,21 @@ Typ `health` ist für Fitness-Apps gedacht, z. B. „an exercise app that tracks
   App auf der Uhr öffnen → Sportart wählen → Match starten → Berechtigungsdialog → Punkte zählen → Display aus/an → Ongoing-Activity-Symbol → Match beenden (Dienst endet).
   Aufnahme auf der Uhr: `adb -s <uhr> shell screenrecord /sdcard/fgs.mp4` (Strg+C beendet) → `adb -s <uhr> pull /sdcard/fgs.mp4`.
   Alternativ die Uhr am Handgelenk filmen.
+
+**Ab 0.6.0 zusätzlich Handy-App: Typ „Verbundenes Gerät“ (`FOREGROUND_SERVICE_CONNECTED_DEVICE`, `LiveRelayService`)**
+- [ ] **Beschreibung:** „Zählt der Nutzer ein Match auf seiner gekoppelten Wear-OS-Uhr und verfolgen Mitspieler oder
+  Zuschauer es live, hält ein Vordergrunddienst auf dem Handy die Verbindung zur zählenden Uhr aufrecht und überträgt
+  deren Spielstand etwa alle 10 Sekunden. Der Dienst startet nur, wenn der Nutzer das Match am Handy startet bzw. die App
+  geöffnet ist, zeigt dauerhaft die Benachrichtigung ‚Live-Stand wird übertragen‘ und endet bei Pause, Matchende oder
+  Übergabe des Zählens.“
+- [ ] **Folgen bei Verzögerung oder Unterbrechung:** Der Live-Stand beim Mitspieler veraltet um Minuten. Lokal geht nichts
+  verloren.
+- [ ] **Video (Pflicht):** Uhr-Verbindung/-Status in der App → Match am Handy starten mit „Meine Uhr“ zählt → Punkte auf der
+  Uhr → Benachrichtigung „Live-Stand wird übertragen“ → Stand beim Mitspieler (optional). Aufnahme per WLAN-Debugging
+  (`adb shell screenrecord`, siehe Memory „Geräte per WLAN-Debugging“).
+- Zusätzliche Berechtigungen ohne Deklaration: `FOREGROUND_SERVICE`, `CHANGE_NETWORK_STATE` (Pflicht für diesen Typ ab
+  Android 14), `WAKE_LOCK`, `POST_NOTIFICATIONS`.
+- Fallback, falls Play den Typ ablehnt: `dataSync` (ab Android 15 auf 6 h je 24 h begrenzt, reicht für ein Match).
 
 ### 6.9 Weitere Erklärungen
 - [ ] **Behörden-App:** Nein. **Finanzfunktionen:** keine. **Nachrichten-App:** Nein. **Gesundheits-/Medizinprodukt:** Nein.

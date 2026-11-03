@@ -8,9 +8,11 @@ import eu.advantly.cloud.sync.ConsentStatus
 import eu.advantly.cloud.sync.FoundProfile
 import eu.advantly.cloud.sync.FriendRequestResult
 import eu.advantly.cloud.sync.FriendsPort
+import eu.advantly.cloud.sync.LiveMatchesPort
 import eu.advantly.cloud.sync.PulledFriendship
 import eu.advantly.cloud.sync.PulledMatch
 import eu.advantly.cloud.sync.SharedMatchesPort
+import eu.advantly.cloud.sync.roleOf
 import eu.advantly.presentation.auth.PhonePullPort
 import eu.advantly.presentation.auth.PhonePullState
 import kotlinx.coroutines.CancellationException
@@ -60,6 +62,14 @@ data class FriendsState(
     val watching: List<WatchedMatch>? = null,
     /** Fehler beim Laden/Beenden von [watching]. */
     val watchingError: String? = null,
+    /** Laufende fremde Matches, die ich verfolge (Bereich „Live“); `null` = noch nicht geladen. */
+    val live: List<LiveEntry>? = null,
+    /** Fehler beim letzten Laden von [live]; die zuletzt geladene Liste bleibt stehen. */
+    val liveError: String? = null,
+    /** Laufende Abgaben eigener Matches (Match-ID → Stand), plan-live-mitspieler §3.4. */
+    val handovers: Map<String, HandoverStatus> = emptyMap(),
+    /** Fehler der letzten Übergabe-Aktion (Einladen, Annehmen, Ablehnen, Übernehmen). */
+    val handoverError: String? = null,
 )
 
 /**
@@ -79,6 +89,10 @@ class FriendsViewModel(
     private val local: SharedMatchesLocal? = null,
     /** Zuschauer (F16/F25); ohne Warteschlange bleiben Zuschauer-Abschnitte und „Ich schaue zu“ aus. */
     private val visitorQueue: VisitorQueue? = null,
+    /** Bereich „Live“ (plan-live-mitspieler §3.1); ohne Port bleibt er aus. */
+    private val liveMatches: LiveMatchesPort? = null,
+    /** Zählen weitergeben (plan-live-mitspieler §3.4); ohne bleibt es aus (iOS, kein Konto-Host). */
+    private val scorers: ScorerHandovers? = null,
 ) {
     private val scope = CoroutineScope(parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]))
     private val mutable = MutableStateFlow(FriendsState())
@@ -99,6 +113,7 @@ class FriendsViewModel(
     /** Match der Zuschauer-Verwaltung; Zähler verwirft „Ich schaue zu“-Antworten, die vor einem Beenden begannen. */
     private var visitorMatch: String? = null
     private var watchingRevision = 0L
+    private var liveLoad: Job? = null
 
     private class Stale : Exception()
 
@@ -258,10 +273,7 @@ class FriendsViewModel(
         loadVisitors()
     }
 
-    /**
-     * Aktive Zuschauer vom Server; ein noch nicht hochgeladenes Match zeigt nur vorgemerkte. Kennt das Match keine
-     * Zuschauer mehr, endet auch der Live-Upload während des Spiels.
-     */
+    /** Aktive Zuschauer vom Server; ein noch nicht hochgeladenes Match zeigt nur vorgemerkte. */
     fun loadVisitors() {
         val queue = visitorQueue ?: return
         val id = visitorMatch ?: return
@@ -273,8 +285,8 @@ class FriendsViewModel(
             val onServer = queue.isOnServer(session.profileId, id)
             val confirmed = if (onServer) queue.port.matchVisitors(session.profileId, id) else emptyList()
             current(session)
+            if (onServer) queue.setConfirmed(session.profileId, id, confirmed.mapTo(HashSet()) { it.profileId })
             if (visitorMatch != id) return@quiet
-            if (onServer) queue.setWatched(session.profileId, id, confirmed.isNotEmpty())
             val entries = confirmed.map { VisitorEntry(it.profileId, it.alias, it.canRevoke) }
             show { copy(visitors = localVisitors(session.profileId, id, entries)) }
         }
@@ -297,9 +309,11 @@ class FriendsViewModel(
         }
         quiet({ error -> show { copy(visitors = visitors?.takeIf { it.matchId == id }?.copy(error = error)) } }) { session ->
             try {
-                profileIds.forEach { queue.port.addVisitor(session.profileId, id, it) }
+                profileIds.forEach {
+                    queue.port.addVisitor(session.profileId, id, it)
+                    queue.setConfirmed(session.profileId, id, queue.confirmed(session.profileId, id) + it)
+                }
                 current(session)
-                queue.setWatched(session.profileId, id, true)
             } finally {
                 if (visitorMatch == id && started(session)) loadVisitors()
             }
@@ -325,6 +339,7 @@ class FriendsViewModel(
         dismissVisitorError()
         quiet({ error -> show { copy(visitors = visitors?.takeIf { it.matchId == id }?.copy(error = error)) } }) { session ->
             queue.port.revokeVisitor(session.profileId, id, profileId)
+            queue.setConfirmed(session.profileId, id, queue.confirmed(session.profileId, id) - profileId)
             current(session)
             if (visitorMatch == id) loadVisitors()
         }
@@ -351,6 +366,138 @@ class FriendsViewModel(
         }
     }
 
+    /** `true`: der Bereich „Live“ gibt es (Port vorhanden). */
+    val hasLive: Boolean get() = liveMatches != null
+
+    /**
+     * Bereich „Live“ laden; die UI ruft das alle paar Sekunden, solange er sichtbar ist. Eine noch laufende Abfrage
+     * deckt den nächsten Aufruf ab (langsames Netz stapelt keine Anfragen). Liefert die Abfrage zum Abwarten, `null` ohne
+     * Port oder nutzbare Sitzung.
+     */
+    fun loadLive(): Job? {
+        val port = liveMatches ?: return null
+        liveLoad?.takeIf { it.isActive }?.let { return it }
+        val revision = watchingRevision
+        liveLoad =
+            quiet({ error -> show { copy(liveError = error) } }) { session ->
+                val live = port.liveMatches(session.profileId).mapNotNull { it.toLiveEntry() }
+                current(session)
+                if (revision != watchingRevision) return@quiet
+                show { copy(live = withRoles(session.profileId, live), liveError = null) }
+            }
+        return liveLoad
+    }
+
+    /** `true`: Zählen weitergeben gibt es hier (Konto-Host mit Session). */
+    val hasHandover: Boolean get() = scorers != null
+
+    /** Eigene, gekoppelte Uhr bekannt: „Auf meiner Uhr zählen“ anbieten. */
+    fun hasWatch(): Boolean = scorers?.devices?.watchId() != null
+
+    /**
+     * Zählendes Handy: „Zählen weitergeben an …“ ([profileId], verknüpfter Mitspieler mit Konto). Lädt ein (vor dem Upload
+     * vorgemerkt); dieses Handy zählt weiter, bis angenommen wurde, und gibt dann selbst ab.
+     */
+    fun handOver(
+        matchId: String,
+        profileId: String,
+    ) = handoverAction { session -> checkNotNull(scorers).invite(session.profileId, matchId, profileId) }
+
+    /** Offene Abgabe zurücknehmen (Rolle am Server entziehen). */
+    fun cancelHandover(matchId: String) = handoverAction { session -> checkNotNull(scorers).cancel(session.profileId, matchId) }
+
+    /** Im Assistenten gewählte Person zählt: Einladung zum gerade gestarteten Match vormerken (Upload folgt). */
+    fun queueHandover(
+        matchId: String,
+        profileId: String,
+    ) = handOver(matchId, profileId)
+
+    /** Empfänger: Zähl-Einladung annehmen, auf diesem Handy oder auf der eigenen Uhr ([onWatch]). */
+    fun acceptScoring(
+        matchId: String,
+        onWatch: Boolean,
+    ) = handoverAction { session -> checkNotNull(scorers).accept(session.profileId, matchId, onWatch) }
+
+    fun declineScoring(matchId: String) = handoverAction { session -> checkNotNull(scorers).decline(session.profileId, matchId) }
+
+    /** Empfänger nach Ablauf der Frist: noch einmal auf den Wechsel warten. */
+    fun retryScoring(matchId: String) = handoverAction { session -> checkNotNull(scorers).retryAccept(session.profileId, matchId) }
+
+    /** Empfänger: Hinweis zur nicht abgeschlossenen Übergabe wegklicken. */
+    fun dismissScoringIssue(matchId: String) =
+        handoverAction { session -> checkNotNull(scorers).dismissAcceptIssue(session.profileId, matchId) }
+
+    /**
+     * Notfall-Übernahme (§3.4): nur mit angenommener Rolle und vollständigem Stand; die Warnung bestätigt die UI vorher.
+     * Spätere Eingaben des bisherigen Zählers verwirft die Engine („N Eingaben nicht übernommen“).
+     */
+    fun takeOverScoring(matchId: String) {
+        val handovers = scorers ?: return
+        val entry = mutable.value.live?.firstOrNull { it.matchId == matchId } ?: return
+        if (entry.scorerRole != "accepted" || !entry.canTakeOver) return
+        if (!handovers.devices.takeOver(matchId)) {
+            show { copy(handoverError = "takeover_failed") }
+            return
+        }
+        reloadLocal()
+        pull?.pullNow()
+    }
+
+    fun dismissHandoverError() = show { copy(handoverError = null) }
+
+    /** Abgleich anstoßen (Live-Ansicht, Push-Deep-Link): Rollen und Zählerwechsel kommen mit dem Pull. */
+    fun syncNow() {
+        if (mutable.value.access == FriendsAccess.READY) pull?.pullNow()
+    }
+
+    /**
+     * Einladen darf nur, wer das Match angelegt hat (`invite_scorer`); ein noch nicht gezogenes Match ist ein eigenes. Wer
+     * per Rolle zählt, kann nicht an den Ersteller zurückgeben (`scorer_target_forbidden`) – der übernimmt selbst.
+     */
+    fun canHandOver(matchId: String): Boolean {
+        val profile = readyProfile() ?: return false
+        if (scorers == null) return false
+        return local?.match(profile, matchId)?.createdBy?.let { it == profile } ?: true
+    }
+
+    /** Verknüpfte Mitspieler mit Konto laut letztem Abgleich (ohne mich), z. B. als Ziel von „Zählen weitergeben“. */
+    fun linkedPlayers(matchId: String): List<FriendEntry> {
+        val profile = readyProfile() ?: return emptyList()
+        return local
+            ?.match(profile, matchId)
+            ?.participants
+            .orEmpty()
+            .mapNotNull { p -> p.profileId?.takeIf { it != profile }?.let { FriendEntry(it, p.displayName) } }
+    }
+
+    private fun handoverAction(block: suspend (CloudSession) -> Unit) {
+        if (scorers == null) return
+        show { copy(handoverError = null) }
+        quiet({ error -> show { copy(handoverError = error) } }) { session ->
+            block(session)
+            current(session)
+            reloadLocal()
+        }
+    }
+
+    /** Meine Zähl-Rolle (gezogen), ob eines meiner Geräte zählt und ob eine Notfall-Übernahme möglich ist. */
+    private fun withRoles(
+        profileId: String,
+        live: List<LiveEntry>,
+    ): List<LiveEntry> {
+        val handovers = scorers ?: return live
+        return live.map { entry ->
+            val role = local?.match(profileId, entry.matchId)?.roleOf(profileId)?.status
+            entry.copy(
+                scorerRole = role,
+                scoring = handovers.devices.scoring(entry.matchId),
+                canTakeOver = role == "accepted" && handovers.devices.canTakeOver(entry.matchId),
+                awaiting = handovers.awaiting(profileId, entry.matchId),
+                acceptIssue = handovers.acceptIssue(profileId, entry.matchId),
+            )
+        }
+    }
+
     /** Nicht mehr zuschauen (Widerruf durch den Visitor selbst). */
     fun stopWatching(matchId: String) {
         val queue = visitorQueue ?: return
@@ -358,12 +505,12 @@ class FriendsViewModel(
             queue.port.revokeVisitor(session.profileId, matchId, session.profileId)
             current(session)
             watchingRevision++
-            show { copy(watching = watching?.filter { it.match.id != matchId }) }
+            show { copy(watching = watching?.filter { it.match.id != matchId }, live = live?.filter { it.matchId != matchId }) }
         }
     }
 
     fun dismissVisitorError() {
-        show { copy(visitors = visitors?.copy(error = null), watchingError = null) }
+        show { copy(visitors = visitors?.copy(error = null), watchingError = null, liveError = null, handoverError = null) }
     }
 
     private fun readyProfile(): String? = shown?.profileId?.takeIf { mutable.value.access == FriendsAccess.READY }
@@ -413,11 +560,11 @@ class FriendsViewModel(
     private fun quiet(
         onError: (String) -> Unit,
         block: suspend (CloudSession) -> Unit,
-    ) {
-        val session = shown ?: return
-        if (mutable.value.access != FriendsAccess.READY) return
+    ): Job? {
+        val session = shown ?: return null
+        if (mutable.value.access != FriendsAccess.READY) return null
         val started = epoch
-        scope.launch {
+        return scope.launch {
             try {
                 // Vor dem RPC: Das SDK kann schon ein anderes Konto tragen, während [shown] noch nachhinkt.
                 auth.requireAccountSession(session)
@@ -452,6 +599,8 @@ class FriendsViewModel(
             epoch++
             action?.cancel()
             action = null
+            liveLoad?.cancel()
+            liveLoad = null
             overlay.clear()
             shareOverlay.clear()
             goneMatches.clear()
@@ -521,6 +670,8 @@ class FriendsViewModel(
                 outgoing = of { it.status == "pending" && it.outgoing },
                 feed = profile?.let { local?.feed(it)?.map(PulledMatch::toFeed) }.orEmpty(),
                 match = profile?.let { sharing(it) },
+                handovers = profile?.let { scorers?.statuses(it) }.orEmpty(),
+                live = profile?.let { p -> mutable.value.live?.let { withRoles(p, it) } } ?: mutable.value.live,
             )
     }
 

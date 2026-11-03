@@ -9,6 +9,7 @@ import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.Wearable
 import com.google.android.gms.wearable.WearableListenerService
 import eu.advantly.android.AdvantlyPhoneApplication
+import eu.advantly.android.auth.phoneLiveViews
 import eu.advantly.data.AndroidInstallationAvailability
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.device.link.WearDataLayerInbound
@@ -19,6 +20,7 @@ import eu.advantly.presentation.live.LiveTelemetryGate
 import eu.advantly.presentation.live.LiveTelemetryStore
 import eu.advantly.sync.protocol.LiveTelemetry
 import eu.advantly.sync.protocol.LiveTelemetryCodec
+import eu.advantly.sync.protocol.LiveViewSubscription
 import eu.advantly.sync.protocol.PeerKind
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutionException
@@ -39,6 +41,9 @@ import java.util.concurrent.TimeoutException
  *
  * - **Telemetrie** (eigener Message-Pfad): nur RAM mit 30-s-Ablauf, nur bekannte eigene Uhr und ihr Uhr-Match mit Workout,
  *   nie bei Telemetrie-Sichtbarkeit „Gar nicht“ (P2-J).
+ *
+ * - **Uhr-Zuschauen** (`/advantly/live/subscribe`): je Abo-Nachricht der eigenen Uhr genau ein Abruf über den
+ *   Konto-Host auf Main ([phoneLiveViews], auch nach Prozesstod), Antwort `LiveViews` an die Uhr (plan-live-mitspieler §3.2).
  *
  * Callbacks laufen auf einem Worker-Thread; die Session nur auf dem Main-Thread benutzen.
  */
@@ -72,6 +77,23 @@ class PhoneSyncListenerService : WearableListenerService() {
                     main.postDelayed(expireTelemetry, LiveTelemetryStore.STALE_AFTER_MS)
                 }
             }
+            return
+        }
+        if (event.path == LiveViewSubscription.MESSAGE_PATH) {
+            val peers =
+                onMainAndWait {
+                    AndroidMatchSessions
+                        .current()
+                        ?.state
+                        ?.value
+                        ?.sync
+                        ?.peers
+                } ?: return
+            PhoneLiveViews.respond(event.sourceNodeId, event.data, peers, send = { node, path, payload ->
+                if (AndroidInstallationGuard.privateTransportAllowed(this)) {
+                    Wearable.getMessageClient(applicationContext).sendMessage(node, path, payload)
+                }
+            }, provider = phoneLiveViews(applicationContext))
             return
         }
         if (event.path != WearDataLayerTransport.MESSAGE_PATH) return

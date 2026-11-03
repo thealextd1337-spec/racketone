@@ -1,11 +1,13 @@
 package eu.advantly.android
 
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.VisibleForTesting
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -18,6 +20,10 @@ import eu.advantly.android.auth.PhoneExportHost
 import eu.advantly.android.auth.createOfflineSupport
 import eu.advantly.android.auth.createPhoneAccount
 import eu.advantly.android.auth.googleCredential
+import eu.advantly.android.auth.phoneNotifications
+import eu.advantly.android.push.AndroidNotificationSettings
+import eu.advantly.android.push.pushTarget
+import eu.advantly.android.sync.LiveRelayService
 import eu.advantly.data.AndroidInstallationAvailability
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.device.link.WearCompanionDetector
@@ -25,12 +31,27 @@ import eu.advantly.match.session.AndroidMatchSessions
 import eu.advantly.match.session.AndroidSessionAccess
 import eu.advantly.match.session.AndroidSessionBoundary
 import eu.advantly.presentation.auth.AuthViewModel
+import eu.advantly.presentation.push.PushTarget
 import eu.advantly.presentation.support.SupportViewModel
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.ui.phone.AdvantlyApp
 
 class MainActivity : ComponentActivity() {
     private var sessionAccess: AndroidSessionAccess? = null
+
+    /** Angetippte Benachrichtigung; der Freunde-Tab setzt sie nach dem Öffnen zurück. */
+    private val pushTarget = mutableStateOf<PushTarget?>(null)
+    private var notifications: AndroidNotificationSettings? = null
+
+    /** Ergebnis vor [start] (neu erzeugte Activity, Installationsprüfung läuft noch): danach zustellen. */
+    private var permissionGranted: Boolean? = null
+
+    // Vor STARTED registriert (Pflicht der Activity-Result-API); die Abfrage selbst erst auf Wunsch im Profil. Das
+    // Ergebnis kommt auch bei einer neu erzeugten Instanz hier an, deshalb ohne Rückruf der fragenden Instanz.
+    private val notificationPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            notifications?.permissionResult(granted) ?: run { permissionGranted = granted }
+        }
     private var account: AuthViewModel? = null
     private val storageHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
@@ -39,6 +60,7 @@ class MainActivity : ComponentActivity() {
         sessionAccess?.close()
         sessionAccess = null
         account = null
+        notifications = null
         // Entfernen der Composition beendet ihre Subscriptions; Kontojobs nicht über Retry behalten.
         viewModelStore.clear()
         showInstallationError()
@@ -67,6 +89,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        intent.pushTarget()?.let { pushTarget.value = it }
+    }
+
     override fun onDestroy() {
         sessionAccess?.close()
         super.onDestroy()
@@ -77,6 +104,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         createdFrom = savedInstanceState
+        if (savedInstanceState == null) pushTarget.value = intent.pushTarget()
         // Kopie und quick_check laufen im Hintergrund; bis dahin nur die Ladeansicht (bekanntes Ergebnis: sofort).
         showInstallationLoading()
         AndroidInstallationGuard.checkAsync(applicationContext) { availability ->
@@ -193,6 +221,17 @@ class MainActivity : ComponentActivity() {
             if (installation.privateTransportAllowed) WatchAppInstaller(this, model.live.deviceStatuses, lifecycleScope) else null
         // Recovery hat Vorrang: im Hold und solange der Abschlussdialog offen ist, wartet der Konto-Fluss.
         val recoveryNotice = mutableStateOf(false)
+        val notifications =
+            if (auth == null) {
+                null
+            } else {
+                runCatching {
+                    phoneNotifications { notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS) }
+                }.getOrNull()
+            }
+        this.notifications = notifications
+        permissionGranted?.let { granted -> notifications?.permissionResult(granted) }
+        permissionGranted = null
         setContent {
             // Debug-Builds zeigen im Live-Menü zusätzlich Latenz-Overlay, Entprellung und Auto-Benchmark (Spike S4)
             AdvantlyApp(
@@ -209,6 +248,9 @@ class MainActivity : ComponentActivity() {
                 onShareText = this@MainActivity::shareText,
                 watchInstall = watchInstall,
                 recoveryHold = !installation.privateTransportAllowed || recoveryNotice.value,
+                notifications = notifications,
+                pushTarget = pushTarget.value,
+                onPushTargetHandled = { pushTarget.value = null },
                 supportModel = support,
                 supportDiagnostics = mapOf("os" to "Android ${android.os.Build.VERSION.RELEASE}", "device" to android.os.Build.MODEL),
                 googleCredential =
@@ -233,7 +275,11 @@ class MainActivity : ComponentActivity() {
         // hier, damit ein Prüfergebnis nach onStart den Abgleich nachholt (der Lifecycle liefert ON_START nach).
         lifecycle.addObserver(
             object : DefaultLifecycleObserver {
-                override fun onStart(owner: LifecycleOwner) = foreground(this@MainActivity)
+                override fun onStart(owner: LifecycleOwner) {
+                    // Live-Übertragung: Ein im Hintergrund verbotener Dienststart gelingt jetzt.
+                    LiveRelayService.onForeground(applicationContext)
+                    foreground(this@MainActivity)
+                }
             },
         )
     }

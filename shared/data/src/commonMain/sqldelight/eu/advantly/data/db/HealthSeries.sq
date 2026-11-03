@@ -1,7 +1,10 @@
 -- Gesundheitsdaten (Plan Puls §3.4): Puls und kumulierte Schritte im 5-s-Raster je Match und Quelle (`HealthSeries`
 -- aus `shared/health`). Werte als CSV, `-` = keine Daten. Nicht in Outbox, Anti-Entropie, Cloud-Upload, Export oder Logs;
 -- verschwindet mit dem Match-Kopf.
+-- `scope_id` = Kontobereich (`identity.scope`) bei der Speicherung: Ein anderes Konto auf demselben Gerät sieht die Serie
+-- auch dann nicht, wenn es dasselbe Match lesen darf (Mitspieler). Leer = vor dem ersten Bereich des Geräts gespeichert.
 CREATE TABLE health_series (
+    scope_id TEXT NOT NULL,
     match_id TEXT NOT NULL,
     source_device_id TEXT NOT NULL,
     start_ms INTEGER NOT NULL,
@@ -12,7 +15,7 @@ CREATE TABLE health_series (
     -- HealthQuality: OK, SPARSE_HR, NO_HR, GAPS
     quality TEXT NOT NULL,
     revision INTEGER NOT NULL,
-    PRIMARY KEY (match_id, source_device_id)
+    PRIMARY KEY (scope_id, match_id, source_device_id)
 );
 
 CREATE TRIGGER health_series_cleanup AFTER DELETE ON match_header BEGIN
@@ -20,43 +23,49 @@ CREATE TRIGGER health_series_cleanup AFTER DELETE ON match_header BEGIN
 END;
 
 revision:
-SELECT revision FROM health_series WHERE match_id = ? AND source_device_id = ?;
+SELECT revision FROM health_series WHERE scope_id = ? AND match_id = ? AND source_device_id = ?;
 
 put:
-INSERT OR REPLACE INTO health_series VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO health_series VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
--- Lesen nur für Matches, die das aktuelle Konto sehen darf (Replikat-Sperre wie match_header.history).
+-- Lesen nur im eigenen Kontobereich und für Matches, die das aktuelle Konto sehen darf (Replikat-Sperre wie
+-- match_header.history).
 forMatch:
 SELECT * FROM health_series
-WHERE match_id = ? AND match_id IN (SELECT match_id FROM replica_readable_match)
+WHERE scope_id = ? AND match_id = ? AND match_id IN (SELECT match_id FROM replica_readable_match)
 ORDER BY source_device_id;
 
 readable:
 SELECT * FROM health_series
-WHERE match_id IN (SELECT match_id FROM replica_readable_match)
+WHERE scope_id = ? AND match_id IN (SELECT match_id FROM replica_readable_match)
 ORDER BY match_id, source_device_id;
 
 -- Eigene, noch nicht bestätigte Serien einer Uhr (Plan Puls §3.5).
 forSource:
 SELECT * FROM health_series
-WHERE source_device_id = ? AND match_id IN (SELECT match_id FROM replica_readable_match)
+WHERE scope_id = ? AND source_device_id = ? AND match_id IN (SELECT match_id FROM replica_readable_match)
 ORDER BY match_id;
 
 -- Nur die Schlüssel samt Revision: billiger Fingerabdruck, ob sich lesbare Serien geändert haben.
 revisions:
 SELECT match_id, source_device_id, revision FROM health_series
-WHERE match_id IN (SELECT match_id FROM replica_readable_match)
+WHERE scope_id = ? AND match_id IN (SELECT match_id FROM replica_readable_match)
 ORDER BY match_id, source_device_id;
 
+-- Erster Kontobereich des Geräts: übernimmt, was vorher ohne Bereich gespeichert wurde.
+adoptUnscoped:
+UPDATE health_series SET scope_id = ? WHERE scope_id = '';
+
 deleteForMatch:
-DELETE FROM health_series WHERE match_id = ?;
+DELETE FROM health_series WHERE scope_id = ? AND match_id = ?;
 
 deleteOne:
-DELETE FROM health_series WHERE match_id = ? AND source_device_id = ?;
+DELETE FROM health_series WHERE scope_id = ? AND match_id = ? AND source_device_id = ?;
 
--- Unbestätigte Serien bleiben höchstens 7 Tage auf der Uhr (E5).
+-- Unbestätigte Serien bleiben höchstens 7 Tage auf der Uhr (E5), in jedem Kontobereich.
 deleteStartedBefore:
 DELETE FROM health_series WHERE start_ms < ?;
 
-deleteAll:
-DELETE FROM health_series;
+-- „Alle Gesundheitsdaten löschen“/Widerruf: alle Serien des Kontobereichs, die vor dem Zeitpunkt begonnen haben.
+deleteInScopeStartedBefore:
+DELETE FROM health_series WHERE scope_id = ? AND start_ms < ?;

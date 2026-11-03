@@ -4,8 +4,13 @@ import androidx.lifecycle.ViewModelStore
 import eu.advantly.cloud.sync.CloudAuthPort
 import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.CloudSession
+import eu.advantly.cloud.sync.ConsentStatus
 import eu.advantly.cloud.sync.IdTokenProvider
+import eu.advantly.cloud.sync.PushTokenPort
 import eu.advantly.presentation.auth.AuthViewModel
+import eu.advantly.presentation.push.PushPreferences
+import eu.advantly.presentation.push.PushRegistration
+import eu.advantly.presentation.push.PushTokenSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -127,6 +132,46 @@ class PhoneAccountPortTest {
             auth.failSignOut = false
             port.signOut()
             assertEquals(2, record.forgotten.size)
+            port.close()
+        }
+
+    /** Push (Plan Live §3.3): Abmelden leert das Server-Token, solange die Sitzung noch gilt, und verwirft es lokal. */
+    @Test fun signOutClearsThePushTokenBeforeTheSessionEnds() =
+        runBlocking {
+            val auth = Auth()
+            auth.session.value = CloudSession("alice", onboarded = true, consentStatus = ConsentStatus.CURRENT)
+            val log = mutableListOf<String>()
+            val prefs =
+                object : PushPreferences {
+                    override var enabled = false
+                    override var hintDone = false
+                    override var uploaded: String? = null
+                }
+            val push =
+                PushRegistration(
+                    prefs,
+                    object : PushTokenSource {
+                        override suspend fun token() = "t1"
+
+                        override suspend fun delete() {
+                            log += "delete"
+                        }
+                    },
+                    object : PushTokenPort {
+                        override suspend fun setPushToken(
+                            profileId: String,
+                            provider: String,
+                            token: String?,
+                        ) {
+                            log += "set:$token:session=${auth.session.value?.profileId}"
+                        }
+                    },
+                ) { auth.session.value }
+            push.enable()
+            val port = PhoneAccountPort(auth, this, Record(), push) {}
+            port.signOut()
+            assertEquals(listOf("set:t1:session=alice", "delete", "set:null:session=alice"), log)
+            assertEquals(false, prefs.enabled)
             port.close()
         }
 }

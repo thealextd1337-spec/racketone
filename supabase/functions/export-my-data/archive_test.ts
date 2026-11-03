@@ -14,6 +14,7 @@ export function fixture() {
   return {
     exportedAt: "2026-10-18T00:00:00Z",
     blockedCount: 2,
+    deferredLiveMatches: 1,
     profile: { alias: '=HYPERLINK("bad")', id: "own", username: "München 🏸" },
     settings: { locale: "de" },
     devices: [{ id: "phone" }],
@@ -63,6 +64,11 @@ Deno.test("complete unicode ZIP has every fixed CSV and nested data", () => {
   assert(decode(files["participants.csv"]).includes("Mitspieler"));
   assert(decode(files["supportMessages.csv"]).includes("Antwort 😀"));
   assert(decode(files["consentHistory.csv"]).includes("TERMS"));
+  // Zurückgestellte laufende Matches nur als Anzahl im Manifest.
+  assert(
+    decode(files["export.csv"]) ===
+      '"exportedAt","blockedCount","deferredLiveMatches"\r\n"2026-10-18T00:00:00Z","2","1"\r\n',
+  );
   // CRC jedes STORE-Eintrags gegen unabhängige Testberechnung prüfen.
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let at = 0;

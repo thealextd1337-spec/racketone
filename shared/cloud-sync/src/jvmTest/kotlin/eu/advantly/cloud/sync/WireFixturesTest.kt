@@ -68,6 +68,18 @@ class WireFixturesTest {
         assertEquals(listOf("self", null), match.participants.map { it.linkStatus })
     }
 
+    /** PR 8/9: Die Erstellerin sieht das Gerät, mit dem die Zähl-Rolle angenommen wurde (Ziel ihres `ScorerChanged`). */
+    @Test
+    fun syncPullWithAcceptedScorerDevice() {
+        val json = fixture("sync_pull_scorer_accepted.json").jsonObject
+        val matches = json.getValue("matches").jsonArray.map { it.jsonObject }
+        keysMatch(PulledRole.serializer(), matches.flatMap { m -> m.getValue("roles").jsonArray.map { it.jsonObject } }, "Rolle")
+        val match = CloudJson.decodeFromJsonElement(PullResponse.serializer(), json).matches.single()
+        val role = match.roleOf(match.roles.single().profileId)
+        assertEquals("accepted", role?.status)
+        assertEquals("d0000000-0000-7000-8000-0000000000b2", role?.deviceId)
+    }
+
     @Test
     fun pulledEventsAndWatermarks() {
         val events = fixture("pull_match_events.json").jsonArray.map { it.jsonObject }
@@ -89,6 +101,38 @@ class WireFixturesTest {
         keysMatch(VisitorTeamMember.serializer(), json.getValue("teams").jsonArray.map { it.jsonObject }, "Team")
         val view = CloudJson.decodeFromJsonElement(VisitorView.serializer(), json)
         assertTrue(view.channel.startsWith("match-live:${view.matchId}:"))
+    }
+
+    /** Vertrag §8 (plan-live-mitspieler): Fixture von Hand nach dem Vertrag, bis `generate.psql` sie erzeugt. */
+    @Test
+    fun liveMatches() {
+        val json = fixture("cloud_my_live_matches.json").jsonArray.map { it.jsonObject }
+        keysMatch(LiveMatch.serializer(), json, "cloud_my_live_matches")
+        keysMatch(
+            VisitorTeamMember.serializer(),
+            json.flatMap { m ->
+                m.getValue("participants").jsonArray.map { it.jsonObject }
+            },
+            "Teilnehmer",
+        )
+        val live = CloudJson.decodeFromJsonElement(ListSerializer(LiveMatch.serializer()), fixture("cloud_my_live_matches.json"))
+        assertTrue(live.isNotEmpty() && live.all { it.relation in setOf("player", "visitor", "scorer") })
+        // Bereinigt wie visitor_view: keine Telemetrie- oder ID-Schlüssel in der Projektion.
+        val allowed =
+            setOf(
+                "sets",
+                "games",
+                "points",
+                "serving",
+                "flags",
+                "status",
+                "winner",
+                "tiebreak",
+                "scorerConnected",
+                "updatedAtMs",
+                "corrected",
+            )
+        assertTrue(live.all { allowed.containsAll(it.projection?.keys.orEmpty()) })
     }
 
     @Test

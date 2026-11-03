@@ -112,7 +112,6 @@ private class UiVisitors : VisitorsPort {
 
 private class UiStore : PendingVisitorStore {
     var pending = emptyMap<String, Set<String>>()
-    var watched = emptySet<String>()
 
     override fun pending(profileId: String) = pending
 
@@ -121,15 +120,6 @@ private class UiStore : PendingVisitorStore {
         pending: Map<String, Set<String>>,
     ) {
         this.pending = pending
-    }
-
-    override fun watched(profileId: String) = watched
-
-    override fun setWatched(
-        profileId: String,
-        matchIds: Set<String>,
-    ) {
-        watched = matchIds
     }
 }
 
@@ -321,7 +311,7 @@ class VisitorsUiTest {
                     }
                 }
                 try {
-                    click("friends_segment_watching")
+                    click("friends_segment_live")
                     waitForIdle()
                     text("Tennis · Läuft · 2026-10-28", "watching_m9")
                     text("Bob gegen Alice", "watching_m9")

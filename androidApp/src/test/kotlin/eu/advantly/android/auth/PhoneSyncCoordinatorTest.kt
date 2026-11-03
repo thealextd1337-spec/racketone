@@ -2,6 +2,9 @@ package eu.advantly.android.auth
 
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import eu.advantly.android.sync.LiveRelay
+import eu.advantly.android.sync.hasLiveAudience
+import eu.advantly.android.sync.onLiveScore
 import eu.advantly.android.sync.onMatchFinished
 import eu.advantly.android.sync.onTelemetryChanged
 import eu.advantly.cloud.sync.CloudInstallation
@@ -16,20 +19,25 @@ import eu.advantly.cloud.sync.PullResponse
 import eu.advantly.cloud.sync.PushBatch
 import eu.advantly.cloud.sync.PushResponse
 import eu.advantly.cloud.sync.SupabasePhoneAuth
+import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.TelemetryVisibility
+import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.Presets
 import eu.advantly.data.LocalData
 import eu.advantly.data.db.AdvantlyDatabase
 import eu.advantly.device.link.testing.ManualScheduler
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.MatchSessions
+import eu.advantly.match.session.ScorerChoice
 import eu.advantly.match.session.SessionConfig
 import eu.advantly.presentation.auth.PhoneSyncBlock
 import eu.advantly.presentation.auth.PhoneSyncState
 import eu.advantly.presentation.auth.PhoneSyncStatus
+import eu.advantly.presentation.friends.LiveScoreUpload
+import eu.advantly.presentation.friends.PendingVisitorStore
 import eu.advantly.sync.protocol.PeerKind
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.auth.auth
@@ -47,6 +55,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -56,6 +65,7 @@ import kotlinx.coroutines.yield
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -154,6 +164,7 @@ class PhoneSyncCoordinatorTest {
 
         /** Nur das Gate des Koordinators: Seine Prüfung kann der eines Hosts vorauslaufen. */
         var coordinatorAccess = true
+        var runsEnded = 0
         var holdPull: Hold? = null
         var holdPush: Hold? = null
         var nowMs = 1_000_000L
@@ -257,7 +268,7 @@ class PhoneSyncCoordinatorTest {
             PhoneSyncCoordinator(auth, phone, pull, upload, scheduler, record, hostScope, { nowMs }, guard, {
                 hostAccess &&
                     coordinatorAccess
-            })
+            }, onRunEnded = { runsEnded++ })
 
         init {
             phone.start()
@@ -760,6 +771,7 @@ class PhoneSyncCoordinatorTest {
                 delay(200)
                 assertFalse(f.sync.state.value.running)
                 assertEquals("erster Lauf, Lauf, genau ein Folgelauf", 3, f.count("start:cloud_sync_pull_v1"))
+                assertEquals("Laufende je Lauf, ein Folgelauf zählt zu seinem Lauf", 2, f.runsEnded)
                 live = false
 
                 val hold = Hold()
@@ -774,6 +786,7 @@ class PhoneSyncCoordinatorTest {
                 withTimeout(15_000) { running.join() }
                 withTimeout(15_000) { while (f.sync.state.value.running) yield() }
                 assertEquals(4, f.count("start:cloud_sync_pull_v1"))
+                assertEquals("Auslöser während des Laufs: kein eigenes Ende", 3, f.runsEnded)
                 assertSerial(f.trace)
 
                 f.sync.onForeground()
@@ -786,6 +799,29 @@ class PhoneSyncCoordinatorTest {
             } finally {
                 f.close()
             }
+        }
+
+    /** M5: Endet ein Lauf, während die Arbeit nach dem vorigen noch läuft, folgt ihm danach eine eigene Runde. */
+    @Test fun aRunEndingDuringTheAfterWorkGetsItsOwnRound() =
+        runBlocking {
+            val ended = Channel<Unit>(Channel.CONFLATED)
+            val release = CompletableDeferred<Unit>()
+            var rounds = 0
+            val work =
+                afterEachRun(ended) {
+                    rounds++
+                    if (rounds == 1) release.await()
+                }
+            ended.trySend(Unit)
+            withTimeout(5_000) { while (rounds < 1) yield() }
+            // zwei weitere Läufe enden, während die erste Runde noch (suspendiert) arbeitet
+            ended.trySend(Unit)
+            ended.trySend(Unit)
+            release.complete(Unit)
+            withTimeout(5_000) { while (rounds < 2) yield() }
+            delay(100)
+            assertEquals("verpasst keinen Lauf, verdoppelt aber auch keinen", 2, rounds)
+            work.cancel()
         }
 
     @Test fun onlyAFinishedMatchTriggersTheMatchEndSync() =
@@ -808,6 +844,125 @@ class PhoneSyncCoordinatorTest {
                 f.close()
             }
         }
+
+    /** M6: Live-Upload nur, solange eines meiner Geräte zählt – nach der Übergabe an ein anderes Konto nicht mehr. */
+    @Test fun liveUploadFollowsOnlyMatchesMyDevicesScore() =
+        runBlocking {
+            val f = Fixture(this)
+            var now = 0L
+            val scheduled = mutableListOf<Long>()
+            val remove = onLiveScore(f.phone, LiveScoreUpload({ now }, { _, delay -> scheduled += delay })) { "alice" }
+            try {
+                val id = f.match()
+                assertEquals("Kopf sofort beim Start", listOf(0L), scheduled)
+                now += 20_000
+                assertTrue(f.phone.recordPoint(eu.advantly.core.model.Side.A))
+                assertEquals(listOf(0L, 0L), scheduled)
+                now += 20_000
+                // Das ScorerChanged selbst lädt der Übergabe-Ablauf hoch (requestSync); danach zählt ein anderes Konto.
+                assertNotNull(f.phone.handOverScoring(id, DeviceId("d0000000-0000-7000-8000-0000000000b1")))
+                assertEquals("zählt ein anderes Konto: kein weiterer Upload", 2, scheduled.size)
+            } finally {
+                remove()
+                f.close()
+            }
+        }
+
+    /**
+     * Live-Übertragung im Vordergrund nur mit Publikum: Die eigene Uhr zählt ein laufendes Match mit verknüpften
+     * Mitspielern oder Zuschauern – vorgemerkt, bestätigt oder nachträglich (anderes Gerät) am Server benannt. Ohne
+     * Publikum, nach Entfernen des letzten Zuschauers, Pause, Ende, Abgabe (hier: das Handy übernimmt) und Abmelden
+     * kein Dienst.
+     */
+    @Test fun liveRelayRunsOnlyWhileMyWatchScoresARunningMatchWithAudience() =
+        runBlocking {
+            val f = Fixture(this)
+            val store = Visitors()
+            var signedIn = true
+            var running: Boolean? = null
+            var onServer = false
+            val asked = mutableListOf<String>()
+            val relay =
+                LiveRelay(f.phone, { signedIn }, { hasLiveAudience(f.data, store, "alice", it) }, {
+                    asked += it.id.value
+                    onServer
+                }) { running = it }
+            try {
+                val id =
+                    f.phone.create(
+                        Presets.TENNIS_SINGLES_BO3.format(),
+                        Lineup(listOf(PlayerId("a")), listOf(PlayerId("b")), PlayerId("a")),
+                        scorer = ScorerChoice.MyWatch,
+                    )
+                val m = id.value
+                assertEquals("„Meine Uhr“ zählt, ohne Publikum kein Dienst", false, running)
+                assertTrue("noch nicht hochgeladen: Server später fragen", asked.isNotEmpty() && asked.all { it == m })
+                onServer = true
+                asked.clear()
+                relay.evaluate()
+                relay.evaluate()
+                assertEquals("einmal je Match, sobald hochgeladen", listOf(m), asked)
+
+                store.pending = mapOf(m to setOf("vera"))
+                relay.evaluate()
+                assertEquals("vorgemerkter Zuschauer", true, running)
+                store.confirmed = mapOf(m to setOf("vera")) // gesendet: bestätigt, nicht mehr vorgemerkt
+                store.pending = emptyMap()
+                relay.evaluate()
+                assertEquals("bestätigter Zuschauer", true, running)
+                store.confirmed = emptyMap()
+                relay.evaluate()
+                assertEquals("letzter Zuschauer entfernt", false, running)
+                assertEquals(listOf(m), asked)
+
+                // Nachträglich auf einem anderen Gerät benannt: Der Vordergrund fragt erneut, die Antwort startet den Dienst.
+                relay.onForeground()
+                assertEquals(listOf(m, m), asked)
+                store.confirmed = mapOf(m to setOf("carol"))
+                relay.evaluate()
+                assertEquals(true, running)
+
+                signedIn = false
+                relay.evaluate()
+                assertEquals("abgemeldet", false, running)
+                signedIn = true
+                val state = f.phone.state.value
+                val match = checkNotNull(state.match(id))
+                for (status in listOf(MatchStatus.PAUSED, MatchStatus.FINISHED)) {
+                    relay.evaluate(state.copy(matches = listOf(match.copy(state = match.state.copy(status = status)))))
+                    assertEquals(status.name, false, running)
+                }
+                relay.evaluate()
+                assertEquals(true, running)
+                assertTrue(f.phone.takeOverScoring(id))
+                assertEquals("Abgabe: die Uhr zählt nicht mehr", false, running)
+
+                // Verknüpfter Mitspieler mit Konto genügt als Publikum, nur für dieses Konto.
+                store.confirmed = emptyMap()
+                assertNotNull(f.data.players.rememberFriend("alice", "p-bob", "Bob", 0) { PlayerId("f1") })
+                val withFriend = match.copy(lineup = Lineup(listOf(PlayerId("a")), listOf(PlayerId("f1")), PlayerId("a")))
+                assertFalse(hasLiveAudience(f.data, store, "alice", match))
+                assertTrue(hasLiveAudience(f.data, store, "alice", withFriend))
+                assertFalse(hasLiveAudience(f.data, store, "bob", withFriend))
+            } finally {
+                relay.close()
+                f.close()
+            }
+        }
+
+    private class Visitors : PendingVisitorStore {
+        var pending = emptyMap<String, Set<String>>()
+        var confirmed = emptyMap<String, Set<String>>()
+
+        override fun pending(profileId: String) = if (profileId == "alice") pending else emptyMap()
+
+        override fun setPending(
+            profileId: String,
+            pending: Map<String, Set<String>>,
+        ) = Unit
+
+        override fun confirmed(profileId: String) = if (profileId == "alice") confirmed else emptyMap()
+    }
 
     @Test fun onlyAChangedTelemetryChoiceTriggersItsSync() =
         runBlocking {

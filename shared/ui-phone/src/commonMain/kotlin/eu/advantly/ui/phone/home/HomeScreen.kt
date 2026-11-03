@@ -105,6 +105,8 @@ fun HomeScreen(
     clock: WallClock = WallClock.System,
     onSupport: (() -> Unit)? = null,
     watchInstall: WatchInstallHost? = null,
+    /** Laufende Fremd-Matches als „Live“ (nur mit Konto); PR 0 öffnet sie nicht mehr als Fortsetzen-Karte. */
+    live: @Composable () -> Unit = {},
 ) {
     val self by model.players.self.collectAsState()
     val open by model.live.openMatches.collectAsState()
@@ -154,6 +156,7 @@ fun HomeScreen(
         open.forEachIndexed { index, snapshot ->
             ResumeCard(snapshot, if (index == 0) "resume_card" else "resume_card_$index", onClick = { model.openMatch(snapshot.matchId) })
         }
+        live()
         // Neues Match auch während laufender Matches (F22): sie laufen weiter, nichts wird abgebrochen
         NewMatchHero(parallel = runningCount > 0, onClick = model::onPlay)
         if (last != null || favorites.isNotEmpty()) {

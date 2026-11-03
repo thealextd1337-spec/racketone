@@ -296,7 +296,7 @@ vor echten Nutzerdaten neu bewerten; beim Pilot mit Fremden Pro oder ein eigenes
 
 ## Noch nicht enthalten (siehe Plan)
 
-Weitere Edge Functions (`push-dispatch`, `delete-account` inkl. Apple-Token-Widerruf, `revenuecat-webhook`),
+Weitere Edge Functions (`delete-account` inkl. Apple-Token-Widerruf, `revenuecat-webhook`; `push-dispatch` ist enthalten, siehe unten),
 Outbox-Retry sowie die tatsächlich eingerichteten gehosteten Projekte
 (staging/prod in `eu-central-1` Frankfurt). P2-A liefert den Onboarding-Job und die staging-Deploy-Pipeline;
 P2-C liefert den Auth-Hook; produktive Auth-/E-Mail-Konfiguration und Datenschutz-Pilot-Gate bleiben manuell
@@ -489,3 +489,26 @@ Remove-Item Env:ADVANTLY_AUTH_TEST_DB_URL
 Prüft genau einen Hook-Verbrauch, parallele Ersatzbindungen/Ausstellungen, den 500-ms-Hook-Lockabbruch und
 issue/bind/hook/cancel bei bereits gehaltenem globalem Sync-Lock. Das Skript legt nur private Ticket-/Budgetdaten
 an, keine Auth-Konten; die Datenbank muss anschließend verworfen werden. Es ersetzt keinen GoTrue-/Gateway-Test.
+
+## Live-Mitspieler, Push-Outbox, Zählen weitergeben
+
+Plan: [docs/plan-live-mitspieler.md](../docs/plan-live-mitspieler.md) (§8 Schnittstellen).
+
+- **PR 1** `20261102000100_live_matches.sql`: `cloud_my_live_matches_v1()` (Cloud-Bindung) liefert laufende, in den
+  letzten 12 h geänderte Matches anderer Konten, in denen ich Mitspieler, Zähler-Person oder Zuschauer bin; Projektion
+  und Namen nur aus `visitor_view`. Eine Blockierung mit dem Ersteller blendet auch für Mitglieder aus. Test 400,
+  Fixture `cloud_my_live_matches.json`.
+- **PR 5** `20261102000200_push_outbox.sql`: `notification_outbox.actor_id` (Standard `auth.uid()`), neue Art
+  `scorer_changed`, Zusammenfassen beim Eintragen (Art + Empfänger + Match bzw. Auslöser, 10 min).
+  `cloud_set_push_token_v1(provider, token)` setzt/leert das Token am gebundenen Gerät. `claim_push_batch_v1(limit)`
+  und `ack_push_batch_v1(results)` nur für `service_role`; Prüfung beim Claim, höchstens 30 Push je Empfänger und
+  Stunde, bis zu 5 Versuche. Ein AFTER-INSERT-Trigger und der Cronjob `advantly-push-dispatch-v1` (jede Minute)
+  rufen per pg_net die Edge Function `push-dispatch` auf; `advantly-push-cleanup-v1` (stündlich) löscht Einträge
+  nach 7 Tagen bzw. 5 Versuchen und leert Push-Token ohne Aktivität seit 180 Tagen. Test 410.
+  **Deploy:** Vault-Secret `push_dispatch_secret` (≥ 32 Zeichen) und identisch `PUSH_DISPATCH_SECRET` in der
+  Function; die API-Basis kommt aus dem bestehenden Vault-Secret `data_exports_project_url`. Ohne Setup meldet der
+  Cronjob `push_scheduler_unavailable`, fachliche Transaktionen laufen weiter.
+- **PR 8** `20261102000300_scorer_handover.sql`: `can_take_over` nur noch Ersteller, angenommene Rolle und
+  Turnierleitung (§7, gilt auch für Projektionen); `sync_pull` liefert `roles.deviceId` an alle Mitglieder;
+  `respond_scorer_invitation` erlaubt bei angenommener Rolle den Gerätewechsel, nie auf widerrufene Geräte;
+  Blockieren/Entfreunden widerrufen Zähl-Rollen zwischen beiden; ScorerChanged erzeugt `scorer_changed`. Test 420.

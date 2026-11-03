@@ -32,6 +32,17 @@ class CloudSyncRepository internal constructor(
         queries.rejectedEvents { id, reason -> id to requireNotNull(reason) }.executeAsList().toMap()
 
     /**
+     * Antwort der Cloud auf ein lokales Event: `false` abgelehnt, `null` noch ausstehend, sonst `true` (angenommen oder
+     * lokal nicht mehr vorhanden, z. B. mit dem Match gelöscht – dann gibt es nichts mehr abzuwarten).
+     */
+    fun uploaded(eventId: String): Boolean? =
+        when (queries.cloudState(eventId).executeAsOneOrNull()) {
+            0L -> null
+            2L -> false
+            else -> true
+        }
+
+    /**
      * `device_not_owned` wieder ausstehend: Nach einer neuen Upload-Sitzung oder neuen G kann das Quellgerät (etwa eine
      * erst später freigegebene Uhr) wieder gelten. Kontoübergreifend; kostet höchstens eine weitere Ablehnungsrunde.
      */

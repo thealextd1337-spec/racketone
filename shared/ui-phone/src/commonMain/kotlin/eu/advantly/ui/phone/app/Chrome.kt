@@ -47,6 +47,7 @@ import eu.advantly.presentation.auth.GoogleCredential
 import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.PlayersPort
 import eu.advantly.presentation.match.TelemetrySettingsPort
+import eu.advantly.presentation.push.NotificationSettingsPort
 import eu.advantly.ui.phone.auth.AccountHeader
 import eu.advantly.ui.phone.auth.AccountRights
 import eu.advantly.ui.phone.auth.BackupStatusLine
@@ -56,6 +57,7 @@ import eu.advantly.ui.phone.designsystem.AdvantlyIcons
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Radii
 import eu.advantly.ui.phone.designsystem.Spacing
+import eu.advantly.ui.phone.friends.NotificationsSection
 import eu.advantly.ui.phone.friends.ShareDefaultSection
 import eu.advantly.ui.phone.live.WatchMark
 import eu.advantly.ui.phone.live.compactScore
@@ -247,6 +249,7 @@ fun ProfileScreen(
     onSupport: (() -> Unit)? = null,
     onRestorePrevious: (() -> Unit)? = null,
     onShareExport: (() -> Unit)? = null,
+    notifications: NotificationSettingsPort? = null,
 ) {
     val colors = AdvantlyTheme.colors
     // Rechtliches ist Pflicht (Play-Freigabe); URLs je Sprache aus den Strings
@@ -278,6 +281,8 @@ fun ProfileScreen(
         // Einstellung „Puls & Schritte“ (P2-J) – wirkt auf Uhr und Handy
         if (telemetry != null) TelemetryVisibilitySection(telemetry, Modifier.padding(top = Spacing.s))
         account?.friends?.let { ShareDefaultSection(it) }
+        // Nur mit Konto und Push-fähiger Plattform (Android mit Firebase); iOS und Builds ohne Firebase blenden ihn aus.
+        if (account != null && notifications != null) NotificationsSection(notifications)
         if (players != null) GuestList(players, onPlayerHistory)
         if (onSupport != null) LinkRow(stringResource(Res.string.support_open), "profile_support", onSupport)
         if (onRestorePrevious != null) {

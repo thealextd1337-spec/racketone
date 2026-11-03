@@ -53,7 +53,6 @@ private object Friendly : FriendsPort {
 
 internal class MemoryVisitorStore : PendingVisitorStore {
     val pending = mutableMapOf<String, Map<String, Set<String>>>()
-    val watched = mutableMapOf<String, Set<String>>()
 
     override fun pending(profileId: String) = pending[profileId].orEmpty()
 
@@ -64,13 +63,15 @@ internal class MemoryVisitorStore : PendingVisitorStore {
         this.pending[profileId] = pending
     }
 
-    override fun watched(profileId: String) = watched[profileId].orEmpty()
+    val confirmed = mutableMapOf<String, Map<String, Set<String>>>()
 
-    override fun setWatched(
+    override fun confirmed(profileId: String) = confirmed[profileId].orEmpty()
+
+    override fun setConfirmed(
         profileId: String,
-        matchIds: Set<String>,
+        confirmed: Map<String, Set<String>>,
     ) {
-        watched[profileId] = matchIds
+        this.confirmed[profileId] = confirmed
     }
 }
 
@@ -172,8 +173,6 @@ class VisitorsViewModelTest {
             assertEquals(1, syncs)
             assertTrue(port.calls.isEmpty())
             assertEquals(listOf(VisitorEntry("vera", "Vera", canRevoke = true, pending = true)), state.visitors?.visitors)
-            // Vorgemerkt heißt auch: der Live-Upload während des Spiels ist schon aktiv.
-            assertTrue(queue.isWatched("alice", "m1"))
             model.removeVisitor("vera")
             assertTrue(state.visitors!!.visitors.isEmpty())
             assertTrue(store.pending("alice").isEmpty())
@@ -186,7 +185,6 @@ class VisitorsViewModelTest {
             port.visitors["m1"] = mutableListOf(MatchVisitor("carol", "Carol", "bob", canRevoke = false))
             model.openVisitors("m1")
             assertEquals(listOf(VisitorEntry("carol", "Carol", canRevoke = false)), state.visitors?.visitors)
-            assertTrue(queue.isWatched("alice", "m1"))
             model.addVisitors(setOf("vera"))
             assertEquals(listOf("alice:list:m1", "alice:add:m1:vera", "alice:list:m1"), port.calls)
             assertEquals(listOf("carol", "vera"), state.visitors?.visitors?.map { it.profileId })
@@ -196,9 +194,41 @@ class VisitorsViewModelTest {
             model.removeVisitor("vera")
             assertEquals("alice:revoke:m1:vera", port.calls[3])
             assertEquals(listOf("carol"), state.visitors?.visitors?.map { it.profileId })
+        }
+
+    /** Live-Übertragung (Android): Bestätigte Zuschauer merkt sich das Gerät – benannt, vom Server gelesen, widerrufen. */
+    @Test fun confirmedVisitorsFollowAddsListsAndRevokes() =
+        fixture {
+            onServer += "m1"
+            port.visitors["m1"] = mutableListOf(MatchVisitor("carol", "Carol", "bob", canRevoke = true))
+            model.openVisitors("m1")
+            assertEquals(setOf("carol"), queue.confirmed("alice", "m1"), "auf einem anderen Gerät benannt")
+            model.addVisitors(setOf("vera"))
+            assertEquals(setOf("carol", "vera"), queue.confirmed("alice", "m1"))
+            model.removeVisitor("vera")
+            model.removeVisitor("carol")
+            assertEquals(emptyMap(), store.confirmed("alice"), "kein Zuschauer mehr: Eintrag entfällt")
+
+            port.failures["vera"] = CloudException("visitor_must_be_friend", true)
+            model.addVisitors(setOf("vera"))
+            assertEquals(emptySet(), queue.confirmed("alice", "m1"), "abgelehnt: nicht bestätigt")
+        }
+
+    @Test fun refreshConfirmedReadsTheServerOnlyForUploadedMatches(): Unit =
+        runBlocking {
+            val port = FakeVisitors()
+            val store = MemoryVisitorStore()
+            val onServer = mutableSetOf<String>()
+            val queue = VisitorQueue(store, port, { _, match -> match in onServer }) {}
+            port.visitors["m1"] = mutableListOf(MatchVisitor("carol", "Carol", "alice", true))
+            queue.refreshConfirmed("alice", "m1")
+            assertTrue(port.calls.isEmpty(), "nicht hochgeladen: keine Abfrage")
+            onServer += "m1"
+            queue.refreshConfirmed("alice", "m1")
+            assertEquals(setOf("carol"), queue.confirmed("alice", "m1"))
             port.visitors["m1"]!!.clear()
-            model.loadVisitors()
-            assertFalse(queue.isWatched("alice", "m1"))
+            queue.refreshConfirmed("alice", "m1")
+            assertEquals(emptyMap(), store.confirmed("alice"))
         }
 
     @Test fun serverErrorsStayInTheVisitorSectionNotTheFriendsTab() =
@@ -223,10 +253,9 @@ class VisitorsViewModelTest {
             val gate = port.gate!!
             port.gate = null
             gate.complete(Unit)
-            // Bob lädt seine eigene Liste; Alices verspätete Antwort ändert weder Anzeige noch Alices Stand.
+            // Bob lädt seine eigene Liste; Alices verspätete Antwort ändert die Anzeige nicht.
             assertEquals(listOf("alice:list:m1", "bob:list:m1"), port.calls)
-            assertNull(store.watched["alice"])
-            assertEquals(setOf("m1"), store.watched["bob"])
+            assertEquals(listOf("vera"), state.visitors?.visitors?.map { it.profileId })
         }
 
     @Test fun wizardQueueOnlyForTheSignedInAccount() =
@@ -303,6 +332,7 @@ class VisitorsViewModelTest {
             port.failures["eve"] = CloudException("cloud_connection_failed", false) // offline
             assertFalse(queue.flush("alice"))
             assertEquals(mapOf("m1" to setOf("eve")), store.pending("alice"))
+            assertEquals(emptyMap(), store.confirmed("alice"), "abgelehnt oder offen: nicht bestätigt")
 
             port.failures.remove("eve")
             port.failures["eve"] = CloudException("rate_limit_exceeded", true)
@@ -312,7 +342,7 @@ class VisitorsViewModelTest {
             port.failures.clear()
             assertTrue(queue.flush("alice"))
             assertTrue(store.pending("alice").isEmpty())
-            assertEquals(setOf("m1"), store.watched("alice"))
+            assertEquals(mapOf("m1" to setOf("eve")), store.confirmed("alice"), "gesendet: bestätigt")
         }
 
     @Test fun permissionFailureDropsOnlyAfterRepeatedAttempts(): Unit =
@@ -331,31 +361,45 @@ class VisitorsViewModelTest {
             assertTrue(store.pending("alice").isEmpty())
         }
 
-    @Test fun liveUploadIsThrottledAndOnlyForWatchedMatches() {
-        val store = MemoryVisitorStore().apply { watched["alice"] = setOf("m1") }
-        val queue = VisitorQueue(store, FakeVisitors(), { _, _ -> true }) {}
+    @Test fun liveUploadStartsAtOnceThenAtMostEveryTenSecondsOnChange() {
         var now = 0L
-        val scheduled = mutableListOf<Pair<Long, () -> Unit>>()
-        var syncs = 0
-        val upload = LiveVisitorUpload(queue, { now }, { delay, run -> scheduled += delay to run }) { syncs++ }
+        val scheduled = mutableListOf<Pair<String, Long>>()
+        val upload = LiveScoreUpload({ now }, { profile, delay -> scheduled += profile to delay })
 
-        upload.onScore("alice", "m1", 3) // erster Stand: keine Änderung
-        upload.onScore("alice", "m2", 3)
-        upload.onScore("alice", "m2", 4) // ohne Visitor
-        upload.onScore(null, "m1", 4) // abgemeldet
+        upload.onScore(null, "m0", 1, scoring = true) // abgemeldet: nichts
         assertTrue(scheduled.isEmpty())
+        upload.onScore("alice", "m1", 3, scoring = true) // neues laufendes Match: Kopf sofort
+        assertEquals(listOf("alice" to 0L), scheduled)
+        upload.onScore("alice", "m1", 3, scoring = true) // unverändert
+        now = 4_000
+        upload.onScore("alice", "m1", 4, scoring = true) // zu früh: einmal planen, frühestens 10 s nach dem letzten
+        upload.onScore("alice", "m1", 5, scoring = true) // schon geplant, der Lauf nimmt es mit
+        assertEquals(listOf("alice" to 0L, "alice" to 6_000L), scheduled)
+        now = 25_000
+        upload.onScore("alice", "m2", 1, scoring = true) // länger nichts geändert: sofort
+        assertEquals("alice" to 0L, scheduled.last())
+        now = 26_000
+        upload.onScore("alice", "m1", 6, scoring = true)
+        assertEquals("alice" to 9_000L, scheduled.last())
+        assertEquals(4, scheduled.size)
+    }
 
-        upload.onScore("alice", "m1", 5)
-        assertEquals(0L, scheduled.single().first)
-        upload.onScore("alice", "m1", 6) // schon geplant
-        assertEquals(1, scheduled.size)
-        now = 1_000
-        scheduled.removeAt(0).second()
-        assertEquals(1, syncs)
-
-        now = 11_000
-        upload.onScore("alice", "m1", 7)
-        assertEquals(20_000L, scheduled.single().first, "höchstens alle 30 s")
+    @Test fun liveUploadIgnoresPulledEventsWhileAnotherAccountScores() {
+        var now = 0L
+        val scheduled = mutableListOf<Long>()
+        val upload = LiveScoreUpload({ now }, { _, delay -> scheduled += delay })
+        upload.onScore("alice", "m1", 3, scoring = true)
+        // Nach der Übergabe an bob: gezogene Events von bob stoßen keinen weiteren Abgleich an (kein Ping-Pong).
+        for (count in 4..9) {
+            now += 10_000
+            upload.onScore("alice", "m1", count, scoring = false)
+        }
+        upload.onScore("alice", "m2", 1, scoring = false) // fremdes Match, das bob zählt
+        assertEquals(listOf(0L), scheduled)
+        // alice zählt wieder (Rückgabe): die nächste Änderung geht sofort hoch.
+        now += 10_000
+        upload.onScore("alice", "m1", 10, scoring = true)
+        assertEquals(listOf(0L, 0L), scheduled)
     }
 
     private fun json(text: String) = Json.parseToJsonElement(text) as JsonObject

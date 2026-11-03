@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
@@ -13,6 +14,11 @@ import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import eu.advantly.android.AdvantlyPhoneApplication
 import eu.advantly.android.BuildConfig
+import eu.advantly.android.push.AndroidNotificationSettings
+import eu.advantly.android.push.AndroidPush
+import eu.advantly.android.push.AndroidPushPreferences
+import eu.advantly.android.push.FirebaseTokens
+import eu.advantly.android.sync.AccountLiveViews
 import eu.advantly.android.sync.AndroidPhoneSyncRecord
 import eu.advantly.android.sync.AndroidPhoneSyncScheduler
 import eu.advantly.cloud.sync.CloudAuthPort
@@ -24,20 +30,24 @@ import eu.advantly.cloud.sync.SupabaseSupport
 import eu.advantly.cloud.sync.pulledFeed
 import eu.advantly.cloud.sync.pulledFriendships
 import eu.advantly.cloud.sync.pulledMatch
-import eu.advantly.core.scoring.MatchStatus
+import eu.advantly.core.model.MatchId
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.data.LocalData
+import eu.advantly.data.scoreEvents
+import eu.advantly.device.link.LiveViewsProvider
 import eu.advantly.match.session.AndroidMatchSessions
-import eu.advantly.match.session.SessionListener
+import eu.advantly.match.session.MatchSession
 import eu.advantly.presentation.auth.AuthViewModel
 import eu.advantly.presentation.auth.GoogleCredential
 import eu.advantly.presentation.auth.PhonePullPort
 import eu.advantly.presentation.auth.PhoneUploadPort
 import eu.advantly.presentation.friends.FriendsViewModel
-import eu.advantly.presentation.friends.LiveVisitorUpload
+import eu.advantly.presentation.friends.ScorerHandovers
 import eu.advantly.presentation.friends.SharedMatchesLocal
 import eu.advantly.presentation.friends.VisitorQueue
+import eu.advantly.presentation.push.PushRegistration
 import eu.advantly.presentation.support.SupportViewModel
+import eu.advantly.sync.protocol.LiveView
 import eu.advantly.sync.protocol.PeerKind
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.createSupabaseClient
@@ -47,9 +57,14 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import java.security.MessageDigest
 import java.security.SecureRandom
 import kotlin.coroutines.resume
@@ -66,7 +81,7 @@ internal fun ComponentActivity.createPhoneAccount(
     lateinit var model: AuthViewModel
     val refresh: () -> Unit = { model.refresh() }
     val account =
-        PhoneAccountPort(core.auth, core.runtime.scope, core.record) {
+        PhoneAccountPort(core.auth, core.runtime.scope, core.record, core.push) {
             if (core.refreshAccount === refresh) core.refreshAccount = null
         }
     val pull =
@@ -94,6 +109,8 @@ internal fun ComponentActivity.createPhoneAccount(
                     core.backend,
                     core.sharedMatches,
                     core.visitors,
+                    core.backend,
+                    core.scorers,
                 ),
             sync = core.sync,
             export = PhoneExportHost(core.auth.dataExports(), applicationContext, core.runtime.scope),
@@ -116,6 +133,8 @@ internal class PhoneAccountPort(
     private val auth: CloudAuthPort,
     processScope: CoroutineScope,
     private val record: PhoneSyncRecord,
+    /** Push (Plan Live §3.3); Abmelden und Löschantrag leeren das Token, solange die Sitzung noch gilt. */
+    private val push: PushRegistration? = null,
     private val release: () -> Unit,
 ) : CloudAuthPort by auth {
     private val work = SupervisorJob(processScope.coroutineContext[Job])
@@ -123,6 +142,8 @@ internal class PhoneAccountPort(
 
     override suspend fun signOut() {
         val profile = auth.accountSession.value?.profileId
+        // Ohne Netz nicht aufhalten: bleibt das Server-Token, meldet FCM es nach deleteToken als ungültig.
+        push?.let { withTimeoutOrNull(PUSH_SIGN_OUT_MS) { it.disable(signedOut = true) } }
         // Die lokale Sitzung endet auch bei Netzfehler oder Abbruch (SupabasePhoneAuth.signOut).
         try {
             auth.signOut()
@@ -135,11 +156,16 @@ internal class PhoneAccountPort(
         val profile = auth.accountSession.value?.profileId
         auth.requestDeletion()
         profile?.let(record::forget)
+        push?.let { withTimeoutOrNull(PUSH_SIGN_OUT_MS) { it.disable(signedOut = true) } }
     }
 
     override fun close() {
         work.cancel()
         release()
+    }
+
+    private companion object {
+        const val PUSH_SIGN_OUT_MS = 5_000L
     }
 }
 
@@ -192,41 +218,65 @@ internal class PhoneAccountCore private constructor(
                 runtime.allowed
             }, storageAction = runtime::storageAction, telemetry = backend)
         }
+    private val syncScheduler = AndroidPhoneSyncScheduler(context)
+
+    /** Jeder beendete Lauf; verarbeitet erst nach dem Aufbau ([init], [afterEachRun]). */
+    private val runEnded = Channel<Unit>(Channel.CONFLATED)
     val sync =
         PhoneSyncCoordinator(
             auth,
             session,
             pull,
             upload,
-            AndroidPhoneSyncScheduler(context),
+            syncScheduler,
             record,
             runtime.scope,
             hostAccessAllowed = { runtime.allowed },
             storageAction = runtime::storageAction,
+            onRunEnded = { runEnded.trySend(Unit) },
         )
 
     /**
      * Zuschauer (F16): Benennungen warten, bis der Match-Kopf hochgeladen ist (oder das Match als Mitglied gezogen
-     * wurde), und gehen nach jedem Abgleich hinaus. Ein Match mit Zuschauern lädt während des Spiels höchstens alle
-     * 30 s den Live-Stand hoch, sonst bleibt es beim Abgleich am Matchende.
+     * wurde), und gehen nach jedem Abgleich hinaus.
      */
-    val visitors =
-        VisitorQueue(record, backend, { profile, match ->
-            guarded(false) { cloudUploads.headerUploaded(match) || cloudPulls.pulledMatch(profile, match) != null }
-        }) { sync.syncNow() }
-    private val liveVisitors =
-        LiveVisitorUpload(visitors, System::currentTimeMillis, { delayMs, run ->
+    val visitors = VisitorQueue(record, backend, ::onServer) { sync.syncNow() }
+
+    private fun onServer(
+        profile: String,
+        match: String,
+    ) = guarded(false) { cloudUploads.headerUploaded(match) || cloudPulls.pulledMatch(profile, match) != null }
+
+    private val handoverPoll =
+        HandoverPoll(SystemClock::elapsedRealtime, { delayMs ->
             runtime.scope.launch {
                 delay(delayMs)
-                run()
+                sync.syncNow()
             }
-        }) { sync.syncNow() }
-    private val scoreListener =
-        SessionListener { state ->
-            val profile = auth.session.value?.profileId
-            state.matches
-                .filter { it.state.status != MatchStatus.FINISHED }
-                .forEach { liveVisitors.onScore(profile, it.id.value, it.eventCount) }
+        })
+
+    /**
+     * Zählen weitergeben (plan-live-mitspieler §3.4): Einladungen warten wie Zuschauer auf den Upload des Match-Kopfs.
+     * Nach jedem Abgleich gibt das zählende Handy bei angenommener Rolle selbst ab ([afterSync]); während einer offenen
+     * Übergabe wird alle 5 s abgeglichen, bis der Wechsel gesehen ist ([HandoverPoll]) – beim Empfänger höchstens
+     * [ScorerHandovers.ACCEPT_LIMIT_MS] ab der Annahme, oder bis ein Rückfall, Widerruf oder das Matchende es beendet. Push (`scorer_responded`,
+     * `scorer_changed`) stößt nur einen Abgleich an – gezogene Events gibt die Session sofort an die Uhr weiter.
+     */
+    val scorers =
+        ScorerHandovers(
+            record,
+            backend,
+            ::onServer,
+            { profile, match -> guarded(null) { cloudPulls.pulledMatch(profile, match) } },
+            PhoneScorerDevices(
+                session,
+                { event -> guarded(null) { cloud.uploaded(event) } },
+                { match -> guarded(emptyList()) { events.scoreEvents(MatchId(match)) } },
+            ) { runtime.allowed },
+            System::currentTimeMillis,
+        ) {
+            handoverPoll.restart()
+            sync.syncNow()
         }
 
     private suspend fun flushVisitors() {
@@ -238,6 +288,31 @@ internal class PhoneAccountCore private constructor(
         } catch (_: Exception) {
             // Nicht endgültige Fehler bleiben vorgemerkt; der nächste Abgleich versucht es erneut.
         }
+    }
+
+    /** Push nur mit Firebase-Werten im Build; der Upload wartet auf Zustimmung und eine nutzbare Sitzung. */
+    val push: PushRegistration? =
+        if (AndroidPush.configured) {
+            PushRegistration(
+                AndroidPushPreferences(context),
+                FirebaseTokens,
+                backend,
+            ) { auth.session.value }
+        } else {
+            null
+        }
+
+    /** Nach jedem Abgleich: vorgemerkte Zähl-Einladungen senden, angenommene Rollen abgeben, ggf. weiter abfragen. */
+    private suspend fun afterSync() {
+        val profile = auth.session.value?.profileId ?: return
+        try {
+            scorers.flush(profile)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // Nicht endgültige Fehler bleiben vorgemerkt; der nächste Abgleich versucht es erneut.
+        }
+        handoverPoll.afterSync(runtime.allowed && scorers.reconcile(profile))
     }
 
     /** Gezogene Freundschaften nur innerhalb der Session-Grenze; nach Widerruf eine leere Liste statt SQL-Zugriff. */
@@ -270,6 +345,16 @@ internal class PhoneAccountCore private constructor(
     /** Profilprüfung über das zuletzt erzeugte Konto-ViewModel; ohne ViewModel prüft geplante Arbeit selbst. */
     var refreshAccount: (() -> Unit)? = null
 
+    /**
+     * Uhr-Zuschauen (plan-live-mitspieler §3.2), auch wenn die Uhr den Prozess gestartet hat: ohne geprüfte Sitzung und
+     * ohne Konto-ViewModel (das prüft selbst) erst die Kontoprüfung wie [runScheduledSync] – im Prozess-Scope, damit
+     * sie eine Zeitüberschreitung des Abrufs übersteht und der nächste Abruf die Sitzung vorfindet.
+     */
+    val liveViews =
+        AccountLiveViews(backend, { auth.session.value?.profileId }) {
+            if (refreshAccount == null) runtime.scope.async { auth.refreshProfile() }.await()
+        }
+
     private val connectivity = context.getSystemService(ConnectivityManager::class.java)
     private val network =
         object : ConnectivityManager.NetworkCallback() {
@@ -281,20 +366,17 @@ internal class PhoneAccountCore private constructor(
 
     init {
         connectivity.registerDefaultNetworkCallback(network, Handler(Looper.getMainLooper()))
-        session.addListener(scoreListener)
-        runtime.scope.launch {
-            var running = false
-            sync.state.collect { state ->
-                if (running && !state.running) flushVisitors()
-                running = state.running
-            }
+        runtime.scope.afterEachRun(runEnded) {
+            flushVisitors()
+            // Nach dem Lauf ist das Gerät gebunden: ausstehendes Token hochladen bzw. leeren.
+            push?.sync()
+            afterSync()
         }
     }
 
     /** Nur für einen widerrufenen Kern: Hosts erst leeren, dann Auth und Laufzeit schließen. */
     private fun close() {
         connectivity.unregisterNetworkCallback(network)
-        session.removeListener(scoreListener)
         refreshAccount = null
         sync.close()
         var pending = if (pull == null) 1 else 2
@@ -335,6 +417,16 @@ internal class PhoneAccountCore private constructor(
 }
 
 /**
+ * Arbeit nach jedem Abgleich ([work], suspendierend) für die Signale aus [ended] (`Channel.CONFLATED`): Endet ein Lauf,
+ * während sie noch läuft, folgt danach genau eine weitere Runde – eine Flanke auf `running` im State-Collector ginge
+ * dabei verloren, und mit ihr die 5-s-Abfrage einer offenen Übergabe.
+ */
+internal fun CoroutineScope.afterEachRun(
+    ended: ReceiveChannel<Unit>,
+    work: suspend () -> Unit,
+) = launch { for (ignored in ended) work() }
+
+/**
  * Geplanter Abgleich (JobScheduler) über denselben Konto-Host wie die UI, also mit denselben Gates.
  * `true`: Die Kontoprüfung scheiterte vorübergehend; das System wiederholt mit seinem Backoff.
  */
@@ -371,6 +463,72 @@ internal suspend fun runScheduledSync(
     }
     core.sync.request(profile)?.join()
     return false
+}
+
+/**
+ * Live-Übertragung ([eu.advantly.android.sync.LiveRelay]): bestätigte Zuschauer von [matchId] vom Server holen, auch auf
+ * einem anderen Gerät benannte. `false`: Match noch nicht auf dem Server (hochgeladen oder als Mitglied gezogen) – später
+ * erneut. Die Abfrage selbst läuft erst nach dem aktuellen Rückruf: Der Konto-Host darf nicht mitten im Bootstrap oder in
+ * einem Session-Listener entstehen. Fehler bleiben still (nächster Versuch im nächsten Vordergrund). Nur auf Main.
+ */
+internal fun refreshMatchVisitors(
+    context: Context,
+    session: MatchSession,
+    profile: String,
+    matchId: String,
+): Boolean {
+    val app = context.applicationContext
+    val onServer =
+        AndroidInstallationGuard.storage(app) {
+            session.data.cloudUploads.headerUploaded(matchId) || session.data.cloudPulls.pulledMatch(profile, matchId) != null
+        } == true
+    if (!onServer) return false
+    Handler(Looper.getMainLooper()).post {
+        if ((app as? AdvantlyPhoneApplication)?.bootstrap() == false) return@post
+        val core =
+            try {
+                PhoneAccountCore.get(app, BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_KEY)
+            } catch (_: Exception) {
+                null
+            } ?: return@post
+        core.runtime.scope.launch {
+            try {
+                // Kaltstart: Die Kontoprüfung (Activity oder Abgleich) setzt die Sitzung gleich.
+                val current = withTimeoutOrNull(VISITOR_LOOKUP_SESSION_MS) { core.auth.session.first { it != null } }
+                if (current?.profileId == profile) core.visitors.refreshConfirmed(profile, matchId)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Offline oder gestört: im nächsten Vordergrund erneut.
+            }
+        }
+    }
+    return true
+}
+
+private const val VISITOR_LOOKUP_SESSION_MS = 30_000L
+
+/**
+ * Uhr-Zuschauen über den prozessweiten Konto-Host (nach Prozesstod wie [runScheduledSync] angelegt). Nur auf Main und
+ * nach dem Bootstrap; ohne Backendkonfiguration, im Restore-Hold oder bei Keystore-Fehlern nie etwas live.
+ */
+internal fun phoneLiveViews(context: Context): LiveViewsProvider =
+    object : LiveViewsProvider {
+        override suspend fun current(): List<LiveView> {
+            val core =
+                try {
+                    PhoneAccountCore.get(context.applicationContext, BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_KEY)
+                } catch (_: Exception) {
+                    null
+                }
+            return (core?.liveViews ?: LiveViewsProvider.Empty).current()
+        }
+    }
+
+/** Profil-Schalter „Benachrichtigungen“; `null` ohne Backend- oder Firebase-Werte (dann ist Push einfach aus). */
+internal fun ComponentActivity.phoneNotifications(requestPermission: () -> Unit): AndroidNotificationSettings? {
+    val core = PhoneAccountCore.get(applicationContext, BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_KEY) ?: return null
+    return core.push?.let { AndroidNotificationSettings(this, it, core.runtime.scope, requestPermission) }
 }
 
 /** Ohne Backendkonfiguration bleiben lokale Entwürfe möglich; Versand zeigt ausdrücklich „nicht verfügbar“. */

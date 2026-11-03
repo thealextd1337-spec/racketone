@@ -1,0 +1,6 @@
+Neu in 0.6.0:
+• Live: laufende Matches deiner Mitspieler am Handy und auf der Wear-OS-Uhr verfolgen.
+• Zählen weitergeben: an einen Mitspieler, auf sein Handy oder seine Uhr.
+• Push-Benachrichtigungen (optional, im Profil einschalten).
+• Mehr Schutz für Pulsdaten. Datenschutzerklärung Version 9.
+Bitte testen: zwei Konten, Live-Ansicht, Übergabe, Benachrichtigungen.

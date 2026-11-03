@@ -23,6 +23,7 @@ import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.LifecycleResumeEffect
+import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.presentation.auth.AuthStep
 import eu.advantly.presentation.auth.AuthViewModel
@@ -31,6 +32,8 @@ import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.match.StartOptions
 import eu.advantly.presentation.match.WatchStatus
+import eu.advantly.presentation.push.NotificationSettingsPort
+import eu.advantly.presentation.push.PushTarget
 import eu.advantly.presentation.stats.transfer
 import eu.advantly.presentation.support.SupportViewModel
 import eu.advantly.ui.phone.app.AdoptedHealthConsentDialog
@@ -57,9 +60,13 @@ import eu.advantly.ui.phone.common.UpdateRequiredBanner
 import eu.advantly.ui.phone.common.safeContentPadding
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.friends.FriendsScreen
+import eu.advantly.ui.phone.friends.HomeLiveSection
+import eu.advantly.ui.phone.friends.LiveFollowScreen
+import eu.advantly.ui.phone.friends.LiveHandoverButton
 import eu.advantly.ui.phone.friends.LiveVisitorsButton
 import eu.advantly.ui.phone.friends.MatchSharingSection
 import eu.advantly.ui.phone.friends.MatchVisitorsSection
+import eu.advantly.ui.phone.friends.handoverCandidates
 import eu.advantly.ui.phone.history.HeadToHeadLinks
 import eu.advantly.ui.phone.history.HeadToHeadScreen
 import eu.advantly.ui.phone.history.HistoryScreen
@@ -96,6 +103,8 @@ import org.jetbrains.compose.resources.stringResource
  *   iOS) zählt ohne Konto
  * @param recoveryHold Recovery-Hold bzw. sein Dialog ist offen: der Konto-Fluss wartet, bis er entschieden ist
  * @param buildNumber `advantly.buildNumber` dieser App für „Was ist neu?“ (Plan 0.5.1 §6); `0` = nie zeigen (Preview)
+ * @param notifications Push-Einstellung (nur Android mit Firebase); `null` blendet Profil-Abschnitt und Hinweis aus
+ * @param pushTarget angetippte Benachrichtigung: öffnet den Freunde-Tab am Ziel, danach [onPushTargetHandled]
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -120,6 +129,9 @@ fun AdvantlyApp(
     watchInstall: WatchInstallHost? = null,
     recoveryHold: Boolean = false,
     buildNumber: Int = 0,
+    notifications: NotificationSettingsPort? = null,
+    pushTarget: PushTarget? = null,
+    onPushTargetHandled: () -> Unit = {},
 ) {
     val accountState = authModel?.state?.collectAsState()?.value
     val archived by model.players.archivedPlayerIds.collectAsState()
@@ -135,6 +147,13 @@ fun AdvantlyApp(
         LaunchedEffect(Unit) { navigator.push(Overlay.Live) }
     }
     BackHandler(enabled = navigator.top != null && !accountRequired) { model.onBack() }
+    // Angetippte Benachrichtigung: Freunde-Tab; das Ziel übernimmt der Tab, sobald er sichtbar ist.
+    LaunchedEffect(pushTarget) {
+        if (pushTarget != null) {
+            navigator.stack.clear()
+            navigator.tab = AppTab.Friends
+        }
+    }
     // App wieder im Vordergrund: Stand der Uhr neu prüfen (Uhr-App evtl. inzwischen installiert/geöffnet)
     LifecycleResumeEffect(model) {
         model.live.refreshWatchStatus()
@@ -143,7 +162,11 @@ fun AdvantlyApp(
     // Im Assistenten gewählte Zuschauer gehen an den Konto-Host (vorgemerkt bis zum Upload des Matches).
     DisposableEffect(model, authModel) {
         model.onVisitorsChosen = authModel?.friends?.let { friends -> { id, visitors -> friends.queueVisitors(id.value, visitors) } }
-        onDispose { model.onVisitorsChosen = null }
+        model.onHandoverChosen = authModel?.friends?.let { friends -> { id, profile -> friends.queueHandover(id.value, profile) } }
+        onDispose {
+            model.onVisitorsChosen = null
+            model.onHandoverChosen = null
+        }
     }
     // Schritt HEALTH im Konto-Einstieg nur, solange „Pulsverlauf aufzeichnen“ auf diesem Gerät offen ist (Plan 0.5.1 §5.1).
     DisposableEffect(model, authModel) {
@@ -210,6 +233,9 @@ fun AdvantlyApp(
                                 onShareText,
                                 watchInstall,
                                 accountRequired = accountRequired,
+                                notifications = notifications,
+                                pushTarget = pushTarget,
+                                onPushTargetHandled = onPushTargetHandled,
                             )
                         }
                     }
@@ -229,14 +255,17 @@ fun AdvantlyApp(
                                     .orEmpty()
                             // Zuschauer-Wahl lebt nur, solange der Assistent offen ist.
                             var visitors by remember { mutableStateOf(emptySet<String>()) }
+                            var handover by remember { mutableStateOf<String?>(null) }
                             WizardScreen(
                                 model.wizard,
                                 onClose = { navigator.pop() },
-                                onStart = { model.finishWizard(visitors) },
+                                onStart = { model.finishWizard(visitors, handover) },
                                 busyMatch = model.watchMatch(),
                                 friends = friends,
                                 visitors = visitors,
                                 onVisitorsChange = { visitors = it },
+                                handover = handover.takeIf { authModel?.friends?.hasHandover == true },
+                                onHandoverChange = { handover = it },
                             )
                         }
                     }
@@ -253,7 +282,17 @@ fun AdvantlyApp(
                                 autoBenchmark = autoBenchmark,
                                 onBenchmarkFinished = onBenchmarkFinished,
                                 visitors = { snapshot ->
-                                    authModel?.friends?.let { friends -> LiveVisitorsButton(friends, snapshot.matchId.value) }
+                                    authModel?.friends?.let { friends ->
+                                        LiveVisitorsButton(friends, snapshot.matchId.value)
+                                        // Abgeben kann nur, wessen Gerät zählt (Handy oder eigene Uhr)
+                                        if (snapshot.isRunning && (snapshot.isScorer || snapshot.watchScores)) {
+                                            LiveHandoverButton(
+                                                friends,
+                                                snapshot.matchId.value,
+                                                handoverCandidates(friends, snapshot, model.players),
+                                            )
+                                        }
+                                    }
                                 },
                             )
                         }
@@ -324,6 +363,23 @@ fun AdvantlyApp(
                         )
                     }
 
+                    is Overlay.Following -> {
+                        Column(Modifier.fillMaxSize().safeContentPadding()) {
+                            authModel?.friends?.let { friends ->
+                                LiveFollowScreen(
+                                    friends,
+                                    top.matchId,
+                                    onBack = { navigator.pop() },
+                                    clock = model.clock,
+                                    onScore = { id ->
+                                        navigator.pop()
+                                        model.openMatch(MatchId(id))
+                                    },
+                                )
+                            }
+                        }
+                    }
+
                     is Overlay.PlayerHistory -> {
                         HeadToHeadScreen(
                             top.playerId,
@@ -374,6 +430,9 @@ private fun TabLayer(
     onShareText: ((String) -> Unit)?,
     watchInstall: WatchInstallHost?,
     accountRequired: Boolean,
+    notifications: NotificationSettingsPort?,
+    pushTarget: PushTarget?,
+    onPushTargetHandled: () -> Unit,
 ) {
     val active by model.live.active.collectAsState()
     val open by model.live.openMatches.collectAsState()
@@ -416,6 +475,11 @@ private fun TabLayer(
                             clock = model.clock,
                             onSupport = if (supportModel != null) ({ showSupport = true }) else null,
                             watchInstall = watchInstall,
+                            live = {
+                                authModel?.friends?.let { friends ->
+                                    HomeLiveSection(friends, model.clock) { navigator.push(Overlay.Following(it)) }
+                                }
+                            },
                         )
                     }
 
@@ -433,6 +497,11 @@ private fun TabLayer(
                                 friends,
                                 onOpenAccount = openAccount,
                                 onShareText = onShareText,
+                                onOpenLive = { navigator.push(Overlay.Following(it)) },
+                                clock = model.clock,
+                                notifications = notifications,
+                                link = pushTarget,
+                                onLinkHandled = onPushTargetHandled,
                             )
                         }
                     }
@@ -451,6 +520,7 @@ private fun TabLayer(
                             onSupport = onSupport,
                             onRestorePrevious = onRestorePrevious,
                             onShareExport = onShareExport,
+                            notifications = notifications,
                         )
                     }
                 }

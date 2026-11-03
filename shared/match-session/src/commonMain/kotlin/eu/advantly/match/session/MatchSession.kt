@@ -359,7 +359,7 @@ class MatchSession(
 
     /** Pulsverlauf (Plan Puls H5/H6): Einwilligung, Stufe je Match, Aufnahme und Übertragung. */
     private val health =
-        HealthSync(data, config.kind, { deviceId }, clock::nowMs, { scopedKey(HealthSync.CONSENT_KEY) }) { message ->
+        HealthSync(data, config.kind, { deviceId }, clock::nowMs, ::scopedKey) { message ->
             targets().forEach { send(it, message) }
         }
 
@@ -705,7 +705,7 @@ class MatchSession(
 
     /**
      * „Pulsverläufe exportieren“ (Plan 0.5.1 §7b): alle lesbaren Serien, leer ohne Serien. Nur der Datenbankteil – die
-     * Datei baut [HealthArchive.encode] abseits des Session-Threads (große Dateien).
+     * Datei baut [HealthArchive.encodeParts] abseits des Session-Threads (große Dateien).
      */
     fun exportHealthSeries(): List<StoredHealthSeries> {
         checkThread()
@@ -727,10 +727,14 @@ class MatchSession(
         return result
     }
 
-    /** „Alle Gesundheitsdaten löschen“ auf diesem Gerät; Serien, die vorher begonnen haben, nimmt es nicht mehr an. */
+    /**
+     * „Alle Gesundheitsdaten löschen“ auf diesem Gerät; Serien, die vorher begonnen haben, nimmt es nicht mehr an. Die
+     * eigenen Uhren löschen ebenfalls, sobald sie das `MatchMeta` erhalten (jetzt oder beim nächsten Verbinden).
+     */
     fun deleteAllHealthData() {
         checkThread()
         health.deleteAll()
+        health.deletedBeforeForPeers()?.let { broadcast(MatchMetaMessage(healthDeletedBefore = it)) }
         dataRevision++
         publish()
     }
@@ -782,7 +786,7 @@ class MatchSession(
         if (health.finish(matchId)) targets().forEach(::sendHealth)
     }
 
-    private fun sendHealth(peer: String) = health.pending().forEach { send(peer, it) }
+    private fun sendHealth(peer: String) = (health.pending() + health.deletions(peerDeviceOf(peer))).forEach { send(peer, it) }
 
     private fun onHealth(
         peer: String,
@@ -821,7 +825,8 @@ class MatchSession(
 
     /**
      * Handy: öffnet [matchId] in der Liste der offenen Matches, ohne den Fokus zu ändern (z. B. ältere laufende Matches
-     * nach einem Neustart – erreichbar, aber nicht automatisch im Vordergrund). `false`, wenn Kopf oder Genesis fehlen.
+     * nach einem Neustart – erreichbar, aber nicht automatisch im Vordergrund). `false`, wenn Kopf oder Genesis fehlen
+     * oder das Match eines anderen Kontos hier nur angezeigt wird ([displayOnly]).
      */
     fun openInBackground(matchId: MatchId): Boolean {
         checkThread()
@@ -1101,6 +1106,206 @@ class MatchSession(
     private fun takeOver(m: OpenMatch): Boolean {
         if (m.status == MatchStatus.FINISHED || m.scorer == deviceId) return false
         return emit(m, ScorerChanged(deviceId)) != null
+    }
+
+    /**
+     * Handy: gibt das Zählen von [matchId] an [target] ab (plan-live-mitspieler §3.4), auch an ein Gerät eines anderen
+     * Kontos, das seine Zähl-Rolle mit diesem Gerät angenommen hat (prüft der Server beim Upload). Nur wenn eines meiner
+     * Geräte zählt:
+     * - dieses Handy: Es erzeugt das `ScorerChanged` sofort;
+     * - die eigene Uhr: Sie erzeugt es selbst nach ihrer letzten Eingabe (Auftrag `WatchAssignment.handOverTo`, gilt auch
+     *   nach einer Funkpause). Erzeugte das Handy es, verwürfe die Rollenprüfung offline gezählte Uhr-Punkte, die es noch
+     *   nicht kennt. Bis die Uhr abgegeben hat, liefert der Aufruf `null` ([watchHandOverPending]); danach das Event der Uhr.
+     * Wiederholte Aufrufe liefern dieselbe Abgabe, solange [target] zählt.
+     */
+    fun handOverScoring(
+        matchId: MatchId,
+        target: DeviceId,
+    ): ScorerHandover? {
+        checkThread()
+        if (!config.parallelMatches) return null
+        val m = opened[matchId] ?: openWithoutFocus(matchId) ?: return null
+        if (m.status == MatchStatus.FINISHED) return null
+        val from = m.scorer
+        if (from == target) {
+            val last = m.engine.events.lastOrNull { it.payload is ScorerChanged }
+            if (last == null || (last.payload as ScorerChanged).scorerDeviceId != target || !isMine(last.deviceId)) return null
+            clearWatchHandOver(matchId)
+            return ScorerHandover(last.id, last.deviceId, target)
+        }
+        if (from == null || !isMine(from)) return null
+        if (from != deviceId) {
+            requestWatchHandOver(m, target)
+            return null
+        }
+        val event = emit(m, ScorerChanged(target)) ?: return null
+        return ScorerHandover(event.id, from, target)
+    }
+
+    /** Handy: Die eigene Uhr zählt [matchId] noch und hat den Abgabe-Auftrag noch nicht ausgeführt (z. B. nicht verbunden). */
+    fun watchHandOverPending(matchId: MatchId): Boolean {
+        checkThread()
+        val assignment = watchAssignment ?: return false
+        val scorer = opened[matchId]?.scorer ?: detachedHead(matchId)?.scorer
+        return assignment.matchId == matchId && assignment.handOverTo != null && isMine(scorer) && scorer != deviceId
+    }
+
+    /**
+     * Handy: offenen Abgabe-Auftrag an die Uhr für [matchId] zurücknehmen (Einladung zurückgenommen, abgelehnt oder
+     * widerrufen). Neue Zuweisungs-Generation, damit eine noch nicht verbundene Uhr ihn nicht mehr ausführt.
+     */
+    fun cancelWatchHandOver(matchId: MatchId) {
+        checkThread()
+        val current = watchAssignment ?: return
+        if (!config.parallelMatches || current.matchId != matchId || current.handOverTo == null) return
+        storeAssignment(current.copy(assignedAtMs = maxOf(clock.nowMs(), current.assignedAtMs + 1), handOverTo = null))
+        broadcastMeta(opened[matchId]?.record ?: data.matches.get(matchId))
+    }
+
+    /** Abgabe-Auftrag an die eigene Uhr (neue Zuweisungs-Generation auf [m]); ein gleicher offener Auftrag bleibt bestehen. */
+    private fun requestWatchHandOver(
+        m: OpenMatch,
+        target: DeviceId,
+    ) {
+        val current = watchAssignment
+        if (current?.matchId == m.id && current.handOverTo == target) return
+        val explicit = current?.matchId == m.id && current.explicit
+        storeAssignment(WatchAssignment(m.id, maxOf(clock.nowMs(), (current?.assignedAtMs ?: 0) + 1), explicit, target))
+        broadcastMeta(m.record)
+    }
+
+    /** Erledigter Auftrag: nur lokal vergessen (die Uhr hat diese Generation schon verarbeitet), damit ein neuer möglich ist. */
+    private fun clearWatchHandOver(matchId: MatchId) {
+        val current = watchAssignment ?: return
+        if (current.matchId == matchId && current.handOverTo != null) storeAssignment(current.copy(handOverTo = null))
+    }
+
+    /**
+     * Abgabe gescheitert (der Server lehnte das `ScorerChanged` aus [handOverScoring] ab, z. B. weil die Rolle inzwischen
+     * entzogen ist): [ScorerHandover.from] zählt wieder. Nur solange laut Log noch [ScorerHandover.to] zählt – hat
+     * inzwischen jemand anderes übernommen, bleibt es dabei.
+     */
+    fun handBackScoring(
+        matchId: MatchId,
+        handover: ScorerHandover,
+    ): Boolean {
+        checkThread()
+        if (!config.parallelMatches || !isMine(handover.from)) return false
+        val m = opened[matchId] ?: openWithoutFocus(matchId) ?: return false
+        if (m.status == MatchStatus.FINISHED || m.scorer != handover.to) return false
+        clearWatchHandOver(matchId)
+        return emit(m, ScorerChanged(handover.from)) != null
+    }
+
+    /** Handy: laufende Matches im Store (eigene und gezogene) für den Rollen-Abgleich der Übergabe. */
+    fun runningMatchIds(): List<MatchId> {
+        checkThread()
+        return data.matches
+            .active()
+            .filter { !it.isFinished && inCurrentScope(it.id) }
+            .map { it.id }
+    }
+
+    /**
+     * Ersteller (plan-live-mitspieler §3.4, Review H4): Ein Gerät eines anderen Kontos zählt mein laufendes Match, ohne dass
+     * es (noch) eine angenommene Rolle hat (Widerruf, Blockieren, Entfreunden, alte App ohne Rolle; prüft der Host). Das
+     * Zählen kommt zurück: an die eigene Uhr, wenn sie zuvor zählte und das Match noch ihr Uhr-Match ist, sonst an dieses
+     * Handy. Der Server erlaubt dem Ersteller das jederzeit (`can_take_over`).
+     */
+    fun reclaimScoring(matchId: MatchId): Boolean {
+        checkThread()
+        if (!config.parallelMatches || !data.accountIdentities.managed || foreign(matchId)) return false
+        val m = opened[matchId] ?: openWithoutFocus(matchId) ?: return false
+        val scorer = m.scorer
+        if (m.status == MatchStatus.FINISHED || scorer == null || scorer == PENDING_WATCH || isMine(scorer)) return false
+        val previous =
+            (listOfNotNull(m.engine.initialScorer) + m.engine.events.mapNotNull { (it.payload as? ScorerChanged)?.scorerDeviceId })
+                .lastOrNull { isMine(it) }
+        val target = previous?.takeIf { isWatchDevice(it) && watchAssignment?.matchId == matchId } ?: deviceId
+        return emit(m, ScorerChanged(target)) != null
+    }
+
+    /**
+     * Fremdes Match, dessen Zähl-Recht ich verloren habe (Rolle nicht mehr angenommen bzw. `scoring_revoked`, Review H4):
+     * nur noch Anzeige ([displayOnly]), bis ein neuer Zählerwechsel kommt. Zählt die eigene Uhr, wechselt sie per
+     * `ScorerChanged` auf dieses Handy in die Anzeige (ihr Hinweis meldet danach noch gezählte Eingaben); [rejectedInputs]
+     * vom Server abgelehnte eigene Eingaben meldet [SessionState.droppedInputs]. `false`, wenn nichts zu tun war.
+     */
+    fun stopScoring(
+        matchId: MatchId,
+        rejectedInputs: Int,
+    ): Boolean {
+        checkThread()
+        if (!config.parallelMatches || !foreign(matchId)) return false
+        val m = opened[matchId] ?: detached(matchId) ?: return false
+        if (!isMine(m.scorer) && m.scorer != PENDING_WATCH) return false
+        val known =
+            m.engine.events
+                .lastOrNull { it.payload is ScorerChanged }
+                ?.id ?: m.genesis.id
+        if (data.settings.get(REVOKED_PREFIX + matchId.value) == known.value) return false
+        if (m.status != MatchStatus.FINISHED && isWatchDevice(m.scorer) && m.scorer != PENDING_WATCH) emit(m, ScorerChanged(deviceId))
+        val last =
+            (opened[matchId] ?: m)
+                .engine.events
+                .lastOrNull { it.payload is ScorerChanged }
+                ?.id ?: m.genesis.id
+        data.settings.put(REVOKED_PREFIX + matchId.value, last.value)
+        closeOpened(matchId)
+        if (watchAssignment?.matchId == matchId) {
+            assignWatch(null)
+            broadcastMeta(null)
+        }
+        if (rejectedInputs > 0) {
+            droppedInputs = DroppedInputs(matchId, rejectedInputs)
+            data.settings.put(DROPPED_NOTICE_KEY, matchId.value + "|" + rejectedInputs)
+        }
+        dataRevision++
+        publish()
+        return true
+    }
+
+    /** Vom Server mit `scoring_revoked` abgelehnte eigene Events in [matchId] (Zähl-Recht verloren, Review H4). */
+    fun revokedInputs(matchId: MatchId): Int {
+        checkThread()
+        val revoked =
+            data.cloud
+                .rejectedEvents()
+                .filterValues { it == SCORING_REVOKED }
+                .keys
+        if (revoked.isEmpty()) return 0
+        return data.events.scoreEvents(matchId).count { it.id.value in revoked }
+    }
+
+    /**
+     * Handy: Eines meiner Geräte zählt das laufende offene Match [matchId] – dieses Handy, die eigene Uhr oder „Meine Uhr“
+     * vor ihrer ersten Meldung ([PENDING_WATCH]; abgeben lässt sich erst, wenn sie sich gemeldet hat).
+     */
+    fun scoresHere(matchId: MatchId): Boolean {
+        checkThread()
+        return opened[matchId]?.let { it.status != MatchStatus.FINISHED && (it.scorer == PENDING_WATCH || isMine(it.scorer)) } == true
+    }
+
+    /**
+     * Notfall-Übernahme (plan-live-mitspieler §3.4) eines Matches eines anderen Kontos, das sonst nur angezeigt wird
+     * ([displayOnly]): nur mit vollständigem Stand (Readiness aus dem Pull, `cloud_match_readiness_v1`). Die angenommene
+     * Zähl-Rolle prüft der Host (gezogene Rollen), der Server noch einmal (`can_take_over`).
+     */
+    fun canTakeOverAsRole(matchId: MatchId): Boolean {
+        checkThread()
+        if (!config.parallelMatches || !foreign(matchId) || !replicaReady(matchId)) return false
+        val m = opened[matchId]?.let { DetachedHead(it.scorer, it.status) } ?: detachedHead(matchId) ?: return false
+        return m.status != MatchStatus.FINISHED && !isMine(m.scorer)
+    }
+
+    /** Siehe [canTakeOverAsRole]; danach zählt dieses Handy, spätere Eingaben des bisherigen Zählers werden verworfen. */
+    fun takeOverAsRole(matchId: MatchId): Boolean {
+        checkThread()
+        if (!canTakeOverAsRole(matchId)) return false
+        if (!openMatch(matchId, focus = false, allowForeign = true)) return false
+        val m = opened.getValue(matchId)
+        persistProgress(m)
+        return takeOver(m)
     }
 
     // --- Zählen (nur der Zähler) ------------------------------------------------------------------
@@ -1451,6 +1656,7 @@ class MatchSession(
     private fun openMatch(
         matchId: MatchId,
         focus: Boolean,
+        allowForeign: Boolean = false,
     ): Boolean {
         if (opened.containsKey(matchId)) {
             if (focus) focusedId = matchId
@@ -1465,11 +1671,95 @@ class MatchSession(
             } catch (e: IllegalArgumentException) {
                 return false
             }
+        val lastChange = engine.events.lastOrNull { it.payload is ScorerChanged }?.id
+        if (!allowForeign && displayOnly(matchId, checkNotNull(engine.genesis).deviceId, engine.state.scorerDeviceId, lastChange)) {
+            return false
+        }
         if (!config.parallelMatches) opened.clear()
         opened[matchId] = OpenMatch(record, checkNotNull(engine.genesis), engine, lifecycleOf(matchId))
         // Handy: im Hintergrund geöffnete Matches (Neustart, Übergabe) bekommen nie automatisch den Fokus
         if (focus || !config.parallelMatches) focusedId = matchId
         return true
+    }
+
+    /**
+     * Mitspieler-Replikat (plan-live-mitspieler §2, PR 0): Laut Pull hat ein anderes Konto das Match erstellt (`createdBy`),
+     * die Genesis stammt aus keiner eigenen Quelle und keines meiner Geräte zählt. Dieses Gerät zeigt es dann nur an
+     * (Verlauf/Detail aus dem Store) und öffnet es nie: kein Fortsetzen, Übernehmen, Beenden/Abbrechen, keine Uhr-Zuweisung,
+     * keine Zähl-Events. Ohne Beleg vom Server (kein Snapshot, kein `createdBy`) gilt das Match wie bisher als eigenes.
+     */
+    private fun displayOnly(
+        matchId: MatchId,
+        source: DeviceId,
+        scorer: DeviceId?,
+        lastChange: EventId? = null,
+    ): Boolean {
+        if (!data.accountIdentities.managed) return false
+        val profile = data.accountIdentities.profile ?: return false
+        val creator = data.cloudPulls.matchCreatedBy(profile, matchId.value) ?: return false
+        if (creator == profile) return false
+        // Zähl-Recht verloren (stopScoring): Anzeige, bis ein neuer Zählerwechsel kommt (z. B. erneute Abgabe)
+        if (lastChange != null && data.settings.get(REVOKED_PREFIX + matchId.value) == lastChange.value) return true
+        if (isMine(scorer)) return false
+        val mine = data.accountIdentities.currentSources()
+        return source.value !in mine && scorer?.value !in mine
+    }
+
+    /**
+     * Uhr: [matchId] ist das vom eigenen (bestätigten) Handy zugewiesene Match. Es darf Events fremder Konten enthalten
+     * (übergebenes Match, plan-live-mitspieler §3.4); die Lesespur prüft weiterhin Data (Access vom Handy).
+     */
+    private fun assignedHere(matchId: MatchId): Boolean = !config.parallelMatches && watchAssignment?.matchId == matchId
+
+    /** Dieses Gerät oder die eigene, bekannte Uhr (nicht der Platzhalter). */
+    private fun isMine(device: DeviceId?): Boolean = device == deviceId || (device != PENDING_WATCH && isWatchDevice(device))
+
+    /** Laut Pull hat ein anderes Konto [matchId] angelegt. */
+    private fun foreign(matchId: MatchId): Boolean {
+        if (!data.accountIdentities.managed) return false
+        val profile = data.accountIdentities.profile ?: return false
+        return data.cloudPulls.matchCreatedBy(profile, matchId.value)?.let { it != profile } == true
+    }
+
+    /** Vollständiger Stand laut letzter Readiness-Prüfung des Pulls; ohne Konto-Kontext gibt es keine Cloud-Replikate. */
+    private fun replicaReady(matchId: MatchId): Boolean {
+        if (data.accountIdentities.scope == null) return true
+        return data.replicas.access(data.replicas.captureContext(), matchId.value)?.ready == true
+    }
+
+    /**
+     * Handy (plan-live-mitspieler §3.4): Ein Fremd-Match, das laut gezogenem `ScorerChanged` eines meiner Geräte zählt
+     * (angenommene Rolle), wird mit vollständigem Stand im Hintergrund geöffnet und damit zählbar; zählt die eigene Uhr,
+     * wird es das Uhr-Match (wie [assignToWatch]; eine bestätigungspflichtige Übernahme des bisherigen Uhr-Matches
+     * erzwingt es nicht).
+     */
+    private fun adoptHandedOverMatches(): List<MatchId> {
+        if (!config.parallelMatches || !data.accountIdentities.managed) return emptyList()
+        val adopted = mutableListOf<MatchId>()
+        for (record in data.matches.active()) {
+            val id = record.id
+            if (watchAssignment?.matchId == id || !foreign(id)) continue
+            val scorer = if (id in opened) opened.getValue(id).scorer else detachedHead(id)?.scorer
+            if (!isMine(scorer)) continue
+            if (id !in opened && (!replicaReady(id) || openWithoutFocus(id) == null)) continue
+            if (isWatchDevice(scorer) && assignToWatch(id)) adopted += id
+        }
+        return adopted
+    }
+
+    /**
+     * Nach von außen gespeicherten Events (Pull) bzw. Datenänderungen: neu gezählte Fremd-Matches übernehmen, einen
+     * gezogenen Zählerwechsel mit der Uhr abgleichen und die eigene Uhr sofort per `Summary` nachziehen lassen (sie fordert
+     * Fehlendes an) statt erst mit der Anti-Entropie.
+     */
+    private fun afterExternalEvents(replayed: Map<MatchId, DeviceId?>) {
+        if (!config.parallelMatches) return
+        val adopted = adoptHandedOverMatches()
+        if (replayed.any { (id, before) -> opened[id]?.let { it.scorer != before } == true }) reconcileWatchScorers()
+        // Summary trägt den Freigabestand (lifecycle) mit: Die Uhr wird bereit und fordert Kopf und Events an
+        val ids = (replayed.keys.filter { it in opened } + adopted).distinct()
+        if (ids.isEmpty()) return
+        targets().filter { peerKindOf(it) == PeerKind.WATCH }.forEach { send(it, summaryOf(ids, reply = false)) }
     }
 
     /** Handy: öffnet [matchId] im Hintergrund (ohne Fokuswechsel), z. B. für die Übergabe des Uhr-Matches. */
@@ -1606,6 +1896,23 @@ class MatchSession(
         return m.record.createdAtMs > assigned.createdAtMs
     }
 
+    /** Zähler und Status eines Matches. */
+    private class DetachedHead(
+        val scorer: DeviceId?,
+        val status: MatchStatus,
+    )
+
+    /** [DetachedHead] nicht geöffneter Matches je Event-Anzahl: Abgleich und Live-Anzeige prüfen sie oft, Replays sind teuer. */
+    private val detachedHeads = HashMap<MatchId, Pair<Long, DetachedHead>>()
+
+    /** Wie [detached], aber nur Zähler und Status – neu berechnet erst, wenn sich die Event-Anzahl des Matches ändert. */
+    private fun detachedHead(matchId: MatchId): DetachedHead? {
+        val count = data.events.count(matchId.value)
+        detachedHeads[matchId]?.let { (cached, head) -> if (cached == count) return head }
+        val m = detached(matchId) ?: return null.also { detachedHeads.remove(matchId) }
+        return DetachedHead(m.scorer, m.status).also { detachedHeads[matchId] = count to it }
+    }
+
     /** Nicht geöffnetes Match als Arbeitskopie (z. B. für eine Übergabe), ohne die Liste der offenen zu ändern. */
     private fun detached(matchId: MatchId): OpenMatch? {
         val record = data.matches.get(matchId) ?: return null
@@ -1675,6 +1982,19 @@ class MatchSession(
         val keep = target != null && open?.let { it.status != MatchStatus.FINISHED && keepsOwnMatch(it, target) } == true
         assignmentPending = target != null && target != focusedId && !keep
         handOverStrayMatches()
+        assignment.handOverTo?.let { to -> target?.let { handOverOnRequest(it, to) } }
+    }
+
+    /**
+     * Uhr: Abgabe-Auftrag des Handys (plan-live-mitspieler §3.4) – zählt diese Uhr [matchId], gibt sie es per
+     * `ScorerChanged` an [to] ab, geordnet nach ihrer letzten Eingabe (auch offline gezählte Punkte bleiben gültig).
+     */
+    private fun handOverOnRequest(
+        matchId: MatchId,
+        to: DeviceId,
+    ) {
+        val m = opened[matchId] ?: detached(matchId) ?: return
+        if (m.status != MatchStatus.FINISHED && m.scorer == deviceId && to != deviceId) emit(m, ScorerChanged(to))
     }
 
     private fun storeAssignment(assignment: WatchAssignment) {
@@ -1682,6 +2002,7 @@ class MatchSession(
         data.settings.put(WATCH_MATCH_KEY, assignment.matchId?.value.orEmpty())
         data.settings.putLong(WATCH_MATCH_AT_KEY, assignment.assignedAtMs)
         data.settings.putBoolean(WATCH_MATCH_EXPLICIT_KEY, assignment.explicit)
+        data.settings.put(WATCH_MATCH_HANDOVER_KEY, assignment.handOverTo?.value.orEmpty())
     }
 
     /**
@@ -1694,7 +2015,12 @@ class MatchSession(
         if (stored != null) {
             val at = data.settings.getLong(WATCH_MATCH_AT_KEY, 0)
             val explicit = data.settings.getBoolean(WATCH_MATCH_EXPLICIT_KEY, false)
-            return WatchAssignment(stored.takeIf { it.isNotEmpty() }?.let(::MatchId), at, explicit)
+            val handOverTo =
+                data.settings
+                    .get(WATCH_MATCH_HANDOVER_KEY)
+                    ?.takeIf { it.isNotEmpty() }
+                    ?.let(::DeviceId)
+            return WatchAssignment(stored.takeIf { it.isNotEmpty() }?.let(::MatchId), at, explicit, handOverTo)
         }
         if (!config.parallelMatches) return null
         if (data.accountIdentities.managed) return null
@@ -1709,13 +2035,33 @@ class MatchSession(
                 lastEventAtMs =
                     EventLog.matchEnd(m.engine.events)?.wallClockMs ?: m.genesis.wallClockMs,
                 eventCount = m.engine.events.size + 1,
+                scorerConnected = scorerReachable(m),
             )
+        reachabilityWritten[m.id] = score.scorerConnected == true
         writingProgress = true
         try {
             data.matches.updateProgress(m.id, state.status, score, clock.nowMs())
         } finally {
             writingProgress = false
         }
+    }
+
+    /** Handy: Zähler von [m] erreichbar – dieses Gerät, kein Zähler (Altformat) oder eine verbundene, kompatible Gegenstelle. */
+    private fun scorerReachable(m: OpenMatch): Boolean = m.scorer.let { it == null || it == deviceId || reachable(it) }
+
+    /** Zuletzt in den Kopf geschriebene Erreichbarkeit je offenem Match ([persistProgress]). */
+    private val reachabilityWritten = HashMap<MatchId, Boolean>()
+
+    /**
+     * Handy (plan-live-mitspieler §8): Verbindung zur Uhr geändert – laufende Matches mit geänderter Erreichbarkeit des
+     * Zählers neu in den Kopf schreiben, damit die Live-Projektion „Zähler offline“ bzw. wieder erreichbar meldet.
+     */
+    private fun refreshScorerReachability() {
+        if (!config.parallelMatches || !started) return
+        opened.values
+            .filter { it.status != MatchStatus.FINISHED && reachabilityWritten[it.id] != scorerReachable(it) }
+            .toList()
+            .forEach(::persistProgress)
     }
 
     // --- Data-Änderungen (Pull, Zustellung, Redaktion) ---------------------------------------------------------
@@ -1738,9 +2084,9 @@ class MatchSession(
      * nur ein offenes Match, dessen Store-Stand vom Engine-Stand abweicht. [matchId] ist nur der Anlass: geprüft werden
      * alle offenen Matches, damit zwischen den Threads kein Zustand außer dem Post-Merker geteilt wird.
      *
-     * Bewusst schmaler als der Empfang von der Uhr: Gepullte Events gehen nicht sofort an die Uhr weiter (erst mit der
-     * Anti-Entropie), und ein gepullter Zählerwechsel (`ScorerChanged`) wird nicht abgeglichen – kein Uhr-Zähler-Abgleich,
-     * keine verworfenen Eingaben, kein Kopf-Fortschritt (die Listenzeile folgt erst dem nächsten eigenen Event).
+     * Danach (plan-live-mitspieler §3.4, [afterExternalEvents]): Die eigene Uhr zieht geänderte offene Matches sofort
+     * nach, ein gezogener Zählerwechsel wird mit der Uhr abgeglichen ([reconcileWatchScorers]), und ein Fremd-Match, das
+     * jetzt eines meiner Geräte zählt, wird zählbar. Kein Kopf-Fortschritt (die Listenzeile folgt dem nächsten eigenen Event).
      */
     @Suppress("UNUSED_PARAMETER")
     fun eventsCommitted(matchId: String) {
@@ -1749,10 +2095,11 @@ class MatchSession(
         scheduler.post {
             eventsCommittedPosted = false
             if (!started) return@post
-            refreshOpened()
+            val replayed = refreshOpened()
             // neue Quellen auch in nicht offenen Matches (Routing); unveränderter Zustand meldet publish nicht
             devicesInMatch.clear()
             neverSentCache.clear()
+            afterExternalEvents(replayed)
             publish()
         }
     }
@@ -1760,7 +2107,7 @@ class MatchSession(
     /** Signal einer Data-Änderung (Rechte, Redaktion, Kopf) auf dem Scheduler: offene Matches und Zustellung nachziehen. */
     private fun onDataChanged() {
         lifecycleRevision++
-        refreshOpened()
+        val replayed = refreshOpened()
         devicesInMatch.clear()
         neverSentCache.clear()
         genesisCache.clear()
@@ -1768,6 +2115,9 @@ class MatchSession(
         // neu eingereihte Zustellungen (Pull: Access, Redaktion) sofort an verbundene Uhren, Wiederholungen nur im Takt
         targets().filter(::deliversTo).forEach { deliverLifecycle(it, onlyIfChanged = true) }
         refreshLifecyclePending()
+        // Readiness (Pull) kommt als Data-Signal: erst dann wird ein übergebenes Fremd-Match zählbar (nach der Access-
+        // Zustellung, damit die Uhr den Beleg des Cloud-Matches schon kennt)
+        afterExternalEvents(replayed)
         publish()
     }
 
@@ -1777,7 +2127,8 @@ class MatchSession(
      * Engine weiter. Replay nur bei geändertem Rechte-/Redaktionsstand oder von außen gespeicherten Events (Pull), Kopffelder
      * werden übernommen.
      */
-    private fun refreshOpened() {
+    private fun refreshOpened(): Map<MatchId, DeviceId?> {
+        val replayed = mutableMapOf<MatchId, DeviceId?>()
         for (m in opened.values.toList()) {
             val record = data.matches.get(m.id)
             if (record == null) {
@@ -1797,6 +2148,7 @@ class MatchSession(
                         null
                     }
                 if (engine?.genesis != null) {
+                    replayed[m.id] = m.scorer
                     m.engine = engine
                     lifecycleReplays++
                 }
@@ -1804,6 +2156,7 @@ class MatchSession(
             // Kopfübernahme (Pull, Vorgänger): Stand und Ergebnis bleiben aus der Engine
             if (record != m.record) m.record = record
         }
+        return replayed
     }
 
     /** Rechte- und Redaktionsstand eines Matches; ohne Konto-Kontext gibt es keinen. */
@@ -1864,7 +2217,11 @@ class MatchSession(
         // P2-1, Empfang: alte Sender schieben vor dem Hello über 3 nach
         if (message !is Hello && requiresFour(peer)) return
         if (message.v >= 4) message = stamps.verified(peer, message) ?: return
-        if (message is Events && scoped && message.events.any { it.deviceId.value !in data.accountIdentities.currentSources() }) return
+        if (message is Events && scoped && !assignedHere(message.matchId) &&
+            message.events.any { it.deviceId.value !in data.accountIdentities.currentSources() }
+        ) {
+            return
+        }
         if (message is Summary && scoped) {
             val own = data.accountIdentities.currentSources()
             if (message.matches.any { (id, vector) ->
@@ -1928,6 +2285,7 @@ class MatchSession(
         if (sessionChanged || forceSync) helloSent.remove(peer)
         val result = ProtocolVersion.negotiate(hello.v, hello.minV, maxVersion(), minVersion())
         compatibility[peer] = result
+        refreshScorerReachability()
         deviceStatuses[peer] =
             DeviceStatus(
                 peer,
@@ -1995,6 +2353,10 @@ class MatchSession(
             }
             val local = sequences(matchId)
             val ranges = AntiEntropy.missingRanges(local, remote)
+            // Uhr ohne Kopf des Uhr-Matches (übergebenes Fremd-Match, §3.4): Kopf und Namen vor den Events
+            if (ranges.isNotEmpty() && remote.watermarks.isEmpty() && matchId == watchAssignment?.matchId && config.parallelMatches) {
+                data.matches.get(matchId)?.let { send(peer, metaMessage(it)) }
+            }
             if (ranges.isNotEmpty()) sendEvents(peer, matchId, load(matchId, ranges))
             when {
                 AntiEntropy.isBehind(VersionVector.fromSequences(local), remote) -> {
@@ -2172,14 +2534,20 @@ class MatchSession(
         adoptOwnerIdentity(peer, message)
         val header = message.match
         if (header != null) {
-            data.matches.insertIfAbsent(
-                header.matchId,
-                header.format,
-                header.lineup,
-                header.meta,
-                header.createdAtMs,
-                header.previousMatchId,
-            )
+            try {
+                data.matches.insertIfAbsent(
+                    header.matchId,
+                    header.format,
+                    header.lineup,
+                    header.meta,
+                    header.createdAtMs,
+                    header.previousMatchId,
+                )
+            } catch (e: IllegalStateException) {
+                // Uhr: übergebenes Fremd-Match (§3.4) vor seiner Freigabe – Zuweisung trotzdem übernehmen; Kopf und Events
+                // fordert die Uhr an, sobald das Handy die Freigabe gemeldet hat (onLifecycle)
+                if (config.parallelMatches || message.watchMatch?.matchId != header.matchId) throw e
+            }
             opened[header.matchId]?.let { m -> data.matches.get(m.id)?.let { m.record = it } }
         }
         // Kopf zuerst: die Uhr vergleicht beim Übergeben mit dem zugewiesenen Match
@@ -2187,6 +2555,7 @@ class MatchSession(
         // Telemetrie-Sichtbarkeit (P2-J): jüngere Änderung übernehmen, ohne Feld (ältere Absender) bleibt der eigene Wert
         message.telemetry?.toPreference()?.let { adoptTelemetry(telemetry.merge(it)) }
         message.healthConsent?.toConsent()?.let { adoptHealthConsent(health.consent.merge(it), merged = true) }
+        message.healthDeletedBefore?.let { if (health.adoptDeletedBefore(it, peerKindOf(peer))) dataRevision++ }
         handOverStrayMatches()
         return header?.matchId ?: message.watchMatch?.matchId
     }
@@ -2396,6 +2765,7 @@ class MatchSession(
                 pushBacklog(peer)
             }
         }
+        refreshScorerReachability()
         publish()
     }
 
@@ -2546,6 +2916,8 @@ class MatchSession(
      */
     private fun inCurrentScope(matchId: MatchId): Boolean =
         !data.accountIdentities.managed ||
+            // übergebenes Fremd-Match (§3.4): eines meiner Geräte zählt, bevor es dort ein eigenes Event gibt
+            opened[matchId]?.let { isMine(it.scorer) } == true || assignedHere(matchId) ||
             (devicesIn(matchId) + data.accountIdentities.matchSources(matchId.value)).any { it in data.accountIdentities.currentSources() }
 
     private fun replicates(
@@ -2878,7 +3250,11 @@ class MatchSession(
         val hello = hellos[peer] ?: return
         val fence = incomingFence(peer, envelope)
         if (config.kind == PeerKind.WATCH && hello.kind == PeerKind.PHONE) {
+            val assigned = watchAssignment?.matchId?.takeIf { it.value in summary.lifecycle && !replicaReady(it) }
             receiver.onLifecycle(summary.lifecycle, fence)
+            // Uhr-Match eben freigegeben (Cloud-Match, z. B. übergebenes Fremd-Match §3.4): Kopf und Events, die vorher
+            // abgewiesen wurden, sofort anfordern statt auf die Anti-Entropie zu warten
+            if (assigned != null && replicaReady(assigned)) send(peer, summaryOf(listOf(assigned), reply = false))
         } else if (config.kind == PeerKind.PHONE && hello.kind == PeerKind.WATCH && activeOwnership != null) {
             delivery.onLifecycle(hello.deviceId.value, summary.lifecycle, fence)
             refreshLifecyclePending()
@@ -2975,6 +3351,7 @@ class MatchSession(
                 watchMatch = watchAssignment?.takeIf { config.parallelMatches },
                 telemetry = TelemetrySetting.of(telemetry),
                 healthConsent = HealthConsentSetting.of(health.consent),
+                healthDeletedBefore = health.deletedBeforeForPeers(),
             )
         }
         val archived = data.players.archivedIds()
@@ -2996,6 +3373,7 @@ class MatchSession(
             watchMatch = watchAssignment?.takeIf { config.parallelMatches },
             telemetry = TelemetrySetting.of(telemetry),
             healthConsent = HealthConsentSetting.of(health.consent),
+            healthDeletedBefore = health.deletedBeforeForPeers(),
         )
     }
 
@@ -3157,6 +3535,12 @@ class MatchSession(
         /** Settings: schon gemeldete Zahl verworfener eigener Eingaben je Match (Uhr). */
         private const val DROPPED_PREFIX = "session.dropped."
 
+        /** Settings: Zähl-Recht in einem fremden Match verloren – Wert ist der damals letzte Zählerwechsel (Event-ID). */
+        private const val REVOKED_PREFIX = "session.scoringRevoked."
+
+        /** Ablehnungsgrund des Servers für Events ohne Zähl-Recht oberhalb des bekannten Stands (Review H4). */
+        const val SCORING_REVOKED = "scoring_revoked"
+
         /** Settings: noch nicht quittierter Hinweis „matchId|Anzahl“ (Uhr). */
         internal const val DROPPED_NOTICE_KEY = "session.droppedNotice"
 
@@ -3174,6 +3558,9 @@ class MatchSession(
 
         /** Settings: Zuweisung war ausdrücklich (Handy bzw. erhaltene, Uhr). */
         private const val WATCH_MATCH_EXPLICIT_KEY = "session.watchMatchExplicit"
+
+        /** Settings: offener Abgabe-Auftrag der Zuweisung (`WatchAssignment.handOverTo`), leer = keiner. */
+        private const val WATCH_MATCH_HANDOVER_KEY = "session.watchMatchHandOver"
 
         /** Settings: Uhr-Match (Handy) bzw. erhaltene Zuweisung (Uhr), leer = keins; dazu ihr Zeitstempel. */
         internal const val WATCH_MATCH_KEY = "session.watchMatch"

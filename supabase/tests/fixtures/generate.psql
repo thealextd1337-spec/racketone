@@ -4,6 +4,7 @@
 -- `<datei>|<json>` – den JSON-Teil unverändert nach supabase/tests/fixtures/<datei> schreiben:
 --   psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -At -F '|' -f supabase/tests/fixtures/generate.psql
 -- Die Schlüssel prüft zusätzlich pgTAP (095_wire_vertrag.test.sql). Läuft in einer Transaktion und hinterlässt nichts.
+-- Der liveState im Push ist wörtlich die Ausgabe von UploadMapping.liveStateOf (LiveStateContractTest prüft das).
 begin;
 select tests.world();
 -- Cloud-RPCs verlangen seit 181 akzeptierte Fassungen (nur Rollback-Fixture).
@@ -17,7 +18,7 @@ select set_config('fx.push', public.sync_push(jsonb_build_object(
       tests.part('s-a', 'A', 1, 'Alice', tests.uid('alice')),
       tests.part('s-b', 'B', 1, 'Max', null, 'b9500000-0000-7000-8000-000000000001')),
       jsonb_build_object('projection', jsonb_build_object('status', 'in_progress', 'eventCount', 2,
-                                                          'liveState', '{"sets":[[1,0]],"points":["15","0"]}'::jsonb)))),
+                                                          'liveState', '{"sets":[],"games":[0,0],"points":["15","0"],"tiebreak":false,"serving":"A","scorerConnected":true,"status":"in_progress","updatedAtMs":2000}'::jsonb)))),
   'events', jsonb_build_array(
       tests.event('e9500000-0000-7000-8000-000000000001', 'a9500000-0000-7000-8000-000000000001', tests.device('a1'), 1, 'MatchCreated'),
       tests.event('e9500000-0000-7000-8000-000000000002', 'a9500000-0000-7000-8000-000000000001', tests.device('a1'), 2, 'PointWon', '{"side":"A"}'),
@@ -36,4 +37,12 @@ select 'get_visitor_match.json', public.get_visitor_match('a9500000-0000-7000-80
 select 'cloud_match_readiness.json', public.cloud_match_readiness_v1('a9500000-0000-7000-8000-000000000001',
   (select visibility_epoch from public.profile_settings where profile_id = auth.uid()),
   (select redaction_epoch from public.matches where id = 'a9500000-0000-7000-8000-000000000001'))::text;
+-- Plan Live PR 1: bob ist eingeladene Zähler-Person des laufenden Matches von alice.
+select tests.authenticate_as('bob');
+select 'cloud_my_live_matches.json', public.cloud_my_live_matches_v1()::text;
+-- Plan Live PR 9: bob registriert seine Uhr und nimmt die Zähl-Rolle mit ihr an; alice (Erstellerin) sieht das Gerät.
+select public.register_device(tests.device('b2'), 'watch', 'wearos', tests.device('b1'));
+select public.respond_scorer_invitation('a9500000-0000-7000-8000-000000000001', true, tests.device('b2'));
+select tests.authenticate_as('alice');
+select 'sync_pull_scorer_accepted.json', public.sync_pull(0)::text;
 rollback;

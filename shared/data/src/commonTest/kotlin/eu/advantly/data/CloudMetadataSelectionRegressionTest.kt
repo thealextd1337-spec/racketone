@@ -186,16 +186,17 @@ class CloudMetadataSelectionRegressionTest {
         assertEquals(setOf("a"), last.completeEventMatches)
     }
 
+    /** H3: Nur eine vorläufige Ablehnung (`device_not_owned`) hält die Projektion zurück, eine endgültige nicht. */
     @Test
-    fun rejectedEventKeepsOnlyItsProjectionBlockedWithoutAcknowledgingIt() {
+    fun onlyAProvisionalRejectionKeepsItsProjectionBlocked() {
         val session = initialize()
         createMatch("a")
         createMatch("b")
         ack(data.cloudUploads.capture(session, 100))
         val receipt = data.cloud.metadataState(CloudMetadataKind.PROJECTION, "a")!!.uploadedRevision
-        val rejected = point("a", 2)
-        data.events.append(rejected)
-        data.cloud.acknowledge(emptySet(), mapOf(rejected.id to "forbidden"))
+        val provisional = point("a", 2)
+        data.events.append(provisional)
+        data.cloud.acknowledge(emptySet(), mapOf(provisional.id to "device_not_owned"))
         data.matches.updateProgress(MatchId("a"), MatchStatus.PAUSED, ScoreSummary(eventCount = 2), 2)
         data.matches.updateProgress(MatchId("b"), MatchStatus.PAUSED, ScoreSummary(eventCount = 1), 2)
         val selected = data.cloudUploads.capture(session, 1)
@@ -203,20 +204,26 @@ class CloudMetadataSelectionRegressionTest {
         assertEquals(listOf("b"), selected.projections.map { it.value.matchId })
         ack(selected)
         assertEquals(receipt, data.cloud.metadataState(CloudMetadataKind.PROJECTION, "a")!!.uploadedRevision)
-        assertEquals(mapOf(rejected.id to "forbidden"), data.cloud.rejectedEvents())
+
+        // endgültig abgelehnt (z. B. Rolle entzogen): kommt nie in die Cloud, die Projektion zählt es nicht mit
+        val final = point("a", 3)
+        data.events.append(final)
+        data.cloud.acknowledge(emptySet(), mapOf(final.id to "forbidden"))
         assertTrue(
             data.cloudUploads
                 .capture(session, 1)
-                .metadataRevisions
+                .projections
                 .isEmpty(),
+            "device_not_owned blockiert weiter",
         )
-        data.cloud.storeDownloaded(listOf(rejected))
+        data.cloud.storeDownloaded(listOf(provisional))
         val ready = data.cloudUploads.capture(session, 1)
-        assertEquals(listOf("a"), ready.projections.map { it.value.matchId })
-        assertTrue(
+        assertEquals(setOf("a"), ready.completeEventMatches)
+        assertEquals(
+            1,
             ready.projections
                 .single()
-                .version.revision > receipt,
+                .value.finalRejected,
         )
     }
 }

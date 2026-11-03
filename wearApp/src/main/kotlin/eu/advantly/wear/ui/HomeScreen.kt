@@ -49,6 +49,8 @@ interface HomeActions {
  * EdgeButton „Neues Match“ (04 §1.2: im `edgeButton`-Slot des `ScreenScaffold`).
  *
  * @param onRestorePrevious Recovery-Paket: späterer Übernahmeweg; nur gesetzt, solange der Host ihn anbietet
+ * @param onSpectate „Live“: fremde Matches ansehen. Immer angeboten statt nur nach einer nicht-leeren Antwort, weil die
+ *   Uhr nur bei offener Ansicht beim Handy nachfragt – ein bedingter Eintrag erschiene sonst nie zum ersten Mal.
  */
 @Composable
 fun HomeScreen(
@@ -57,6 +59,7 @@ fun HomeScreen(
     powerSave: Boolean,
     actions: HomeActions,
     onRestorePrevious: (() -> Unit)? = null,
+    onSpectate: (() -> Unit)? = null,
 ) {
     val listState = rememberScalingLazyListState()
     ScreenScaffold(
@@ -107,6 +110,17 @@ fun HomeScreen(
                         colors = ButtonDefaults.filledTonalButtonColors(),
                         label = { Text(stringResource(R.string.home_repeat_last)) },
                         secondaryLabel = { Text("${sportName(last.sport)} · $format · $discipline", maxLines = 2) },
+                    )
+                }
+            }
+            if (onSpectate != null) {
+                item {
+                    Button(
+                        onClick = onSpectate,
+                        modifier = Modifier.fillMaxWidth().testTag(SPECTATE_ENTRY_TAG),
+                        colors = ButtonDefaults.filledTonalButtonColors(),
+                        label = { Text(stringResource(R.string.spectate_entry)) },
+                        secondaryLabel = { Text(stringResource(R.string.spectate_entry_hint), maxLines = 2) },
                     )
                 }
             }

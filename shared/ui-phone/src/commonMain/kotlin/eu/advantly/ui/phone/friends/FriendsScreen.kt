@@ -40,6 +40,10 @@ import eu.advantly.cloud.sync.FriendRequestResult
 import eu.advantly.presentation.friends.FriendEntry
 import eu.advantly.presentation.friends.FriendsAccess
 import eu.advantly.presentation.friends.FriendsViewModel
+import eu.advantly.presentation.match.WallClock
+import eu.advantly.presentation.push.FriendsSection
+import eu.advantly.presentation.push.NotificationSettingsPort
+import eu.advantly.presentation.push.PushTarget
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.resources.Res
@@ -68,16 +72,19 @@ import eu.advantly.ui.phone.resources.friends_error_already_member
 import eu.advantly.ui.phone.resources.friends_error_binding
 import eu.advantly.ui.phone.resources.friends_error_connection
 import eu.advantly.ui.phone.resources.friends_error_cooldown
+import eu.advantly.ui.phone.resources.friends_error_no_invitation
 import eu.advantly.ui.phone.resources.friends_error_no_participation
 import eu.advantly.ui.phone.resources.friends_error_not_found
 import eu.advantly.ui.phone.resources.friends_error_not_pending
 import eu.advantly.ui.phone.resources.friends_error_rate_limit
 import eu.advantly.ui.phone.resources.friends_error_revoked
+import eu.advantly.ui.phone.resources.friends_error_scorer_not_allowed
 import eu.advantly.ui.phone.resources.friends_error_self
 import eu.advantly.ui.phone.resources.friends_error_session
 import eu.advantly.ui.phone.resources.friends_error_unavailable
 import eu.advantly.ui.phone.resources.friends_error_visitor_limit
 import eu.advantly.ui.phone.resources.friends_error_visitor_not_friend
+import eu.advantly.ui.phone.resources.friends_error_watch_unavailable
 import eu.advantly.ui.phone.resources.friends_found_send
 import eu.advantly.ui.phone.resources.friends_incoming_title
 import eu.advantly.ui.phone.resources.friends_list_title
@@ -94,8 +101,8 @@ import eu.advantly.ui.phone.resources.friends_result_requested
 import eu.advantly.ui.phone.resources.friends_search
 import eu.advantly.ui.phone.resources.friends_segment_feed
 import eu.advantly.ui.phone.resources.friends_segment_friends
+import eu.advantly.ui.phone.resources.friends_segment_live
 import eu.advantly.ui.phone.resources.friends_segment_requests
-import eu.advantly.ui.phone.resources.friends_segment_watching
 import eu.advantly.ui.phone.resources.friends_share
 import eu.advantly.ui.phone.resources.friends_share_text
 import eu.advantly.ui.phone.resources.friends_unblock
@@ -107,7 +114,7 @@ import eu.advantly.ui.phone.resources.tab_friends
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
-private enum class Segment { FEED, FRIENDS, REQUESTS, WATCHING }
+private enum class Segment { FEED, FRIENDS, REQUESTS, LIVE }
 
 private enum class ConfirmKind(
     val action: StringResource,
@@ -126,10 +133,11 @@ private data class Confirm(
 )
 
 /**
- * Freunde-Tab (04 §2.1, H11): Segmente Feed (geteilte Matches von Freunden, P2-E) · Freunde · Anfragen · Ich schaue zu
- * (Zuschauer, F16). Ohne Konto, Zustimmung oder
+ * Freunde-Tab (04 §2.1, H11): Segmente Feed (geteilte Matches von Freunden, P2-E) · Freunde · Anfragen · Live
+ * (Ich spiele mit / Ich schaue zu, plan-live-mitspieler §3.1; [onOpenLive] öffnet die Live-Ansicht). Ohne Konto, Zustimmung oder
  * bei pausiertem Konto nur ein Hinweis; das Zählen ohne Konto bleibt unberührt. [onShareText] öffnet das
- * Teilen-Menü der Plattform (ui-phone bleibt plattformneutral), `null` blendet „Teilen“ aus.
+ * Teilen-Menü der Plattform (ui-phone bleibt plattformneutral), `null` blendet „Teilen“ aus. [link] (angetippte
+ * Benachrichtigung) wählt Segment und Match-Detail; [notifications] zeigt einmalig den Hinweis „Benachrichtigungen“.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -138,6 +146,11 @@ fun FriendsScreen(
     onOpenAccount: () -> Unit,
     onShareText: ((String) -> Unit)?,
     modifier: Modifier = Modifier,
+    onOpenLive: (String) -> Unit = {},
+    clock: WallClock = WallClock.System,
+    notifications: NotificationSettingsPort? = null,
+    link: PushTarget? = null,
+    onLinkHandled: () -> Unit = {},
 ) {
     val state by model.state.collectAsState()
     var segment by rememberSaveable { mutableStateOf(Segment.FRIENDS) }
@@ -146,6 +159,41 @@ fun FriendsScreen(
     var query by rememberSaveable { mutableStateOf("") }
     var openFeed by rememberSaveable { mutableStateOf<String?>(null) }
     LaunchedEffect(state.access) { if (state.access == FriendsAccess.READY) model.open() }
+    // Erst mit nutzbarer Sitzung: „Live“ prüft am Server, ob das Match noch läuft (sonst Feed-Detail, falls vorhanden).
+    LaunchedEffect(link, state.access == FriendsAccess.READY) {
+        if (link == null || model.state.value.access != FriendsAccess.READY) return@LaunchedEffect
+        val id = link.matchId
+        openFeed = null
+        when (link.section) {
+            FriendsSection.FEED -> {
+                segment = Segment.FEED
+                openFeed = id
+            }
+
+            FriendsSection.FRIENDS -> {
+                segment = Segment.FRIENDS
+            }
+
+            FriendsSection.REQUESTS -> {
+                segment = Segment.REQUESTS
+            }
+
+            FriendsSection.LIVE -> {
+                segment = Segment.LIVE
+                if (id != null) {
+                    model.loadLive()?.join()
+                    val current = model.state.value
+                    if (current.live.orEmpty().any { it.matchId == id }) {
+                        onOpenLive(id)
+                    } else if (current.feed.any { it.id == id }) {
+                        segment = Segment.FEED
+                        openFeed = id
+                    }
+                }
+            }
+        }
+        onLinkHandled()
+    }
     val colors = AdvantlyTheme.colors
     Column(
         modifier
@@ -175,13 +223,14 @@ fun FriendsScreen(
             }
             return@Column
         }
+        if (notifications != null && (state.friends.isNotEmpty() || state.incoming.isNotEmpty())) NotificationsHint(notifications)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             val requests = state.incoming.size
             listOf(
                 Segment.FEED to stringResource(Res.string.friends_segment_feed),
                 Segment.FRIENDS to stringResource(Res.string.friends_segment_friends),
                 Segment.REQUESTS to stringResource(Res.string.friends_segment_requests) + if (requests > 0) " ($requests)" else "",
-                Segment.WATCHING to stringResource(Res.string.friends_segment_watching),
+                Segment.LIVE to stringResource(Res.string.friends_segment_live),
             ).forEach { (value, label) ->
                 FilterChip(
                     selected = segment == value,
@@ -290,8 +339,8 @@ fun FriendsScreen(
                 }
             }
 
-            Segment.WATCHING -> {
-                WatchingList(model, state)
+            Segment.LIVE -> {
+                LiveSection(model, state, clock, onOpenLive)
             }
         }
     }
@@ -422,6 +471,9 @@ internal fun errorLabel(error: String): StringResource =
         "visitor_must_be_friend" -> Res.string.friends_error_visitor_not_friend
         "already_member" -> Res.string.friends_error_already_member
         "visitor_limit_reached" -> Res.string.friends_error_visitor_limit
+        "scorer_not_allowed", "is_visitor", "cannot_invite_self" -> Res.string.friends_error_scorer_not_allowed
+        "no_pending_invitation" -> Res.string.friends_error_no_invitation
+        "watch_unavailable" -> Res.string.friends_error_watch_unavailable
         "device_not_authorized" -> Res.string.friends_error_binding
         "device_revoked" -> Res.string.friends_error_revoked
         "cloud_session_changed" -> Res.string.friends_error_session

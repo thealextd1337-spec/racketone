@@ -23,13 +23,16 @@ interface PendingVisitorStore {
         pending: Map<String, Set<String>>,
     )
 
-    /** Matches mit mindestens einem bestätigten Visitor: nur sie laden den Live-Stand während des Spiels hoch. */
-    fun watched(profileId: String): Set<String>
+    /**
+     * Bestätigte Zuschauer: Match-ID → Profil-IDs, die dieses Gerät erfolgreich benannt oder vom Server gelesen hat.
+     * Entscheidet mit über die Live-Übertragung im Vordergrund (Android); ohne Host-Speicher bleibt sie leer.
+     */
+    fun confirmed(profileId: String): Map<String, Set<String>> = emptyMap()
 
-    fun setWatched(
+    fun setConfirmed(
         profileId: String,
-        matchIds: Set<String>,
-    )
+        confirmed: Map<String, Set<String>>,
+    ) = Unit
 }
 
 /**
@@ -67,26 +70,37 @@ class VisitorQueue(
         requestSync()
     }
 
+    fun confirmed(
+        profileId: String,
+        matchId: String,
+    ): Set<String> = store.confirmed(profileId)[matchId].orEmpty()
+
+    /** Bestätigte Zuschauer von [matchId] ersetzen (leer: Eintrag entfällt). */
+    fun setConfirmed(
+        profileId: String,
+        matchId: String,
+        visitorIds: Set<String>,
+    ) {
+        val all = store.confirmed(profileId)
+        if (all[matchId].orEmpty() == visitorIds) return
+        store.setConfirmed(profileId, if (visitorIds.isEmpty()) all - matchId else all + (matchId to visitorIds))
+    }
+
+    /** Bestätigte Zuschauer vom Server übernehmen, auch auf einem anderen Gerät benannte; nur hochgeladene Matches. */
+    suspend fun refreshConfirmed(
+        profileId: String,
+        matchId: String,
+    ) {
+        if (!onServer(profileId, matchId)) return
+        setConfirmed(profileId, matchId, port.matchVisitors(profileId, matchId).mapTo(HashSet()) { it.profileId })
+    }
+
     /** Vorgemerkte Benennung zurücknehmen (noch nichts gesendet). */
     fun forget(
         profileId: String,
         matchId: String,
         visitorId: String,
     ) = removePending(profileId, matchId, visitorId)
-
-    fun isWatched(
-        profileId: String,
-        matchId: String,
-    ): Boolean = matchId in store.watched(profileId) || pending(profileId, matchId).isNotEmpty()
-
-    fun setWatched(
-        profileId: String,
-        matchId: String,
-        watched: Boolean,
-    ) {
-        val current = store.watched(profileId)
-        if ((matchId in current) != watched) store.setWatched(profileId, if (watched) current + matchId else current - matchId)
-    }
 
     /**
      * Vorgemerkte Benennungen hochgeladener Matches senden. Endgültige Ablehnungen (kein Freund mehr, schon Mitspieler,
@@ -101,8 +115,9 @@ class VisitorQueue(
                 for (visitorId in visitors) {
                     try {
                         port.addVisitor(profileId, matchId, visitorId)
-                        setWatched(profileId, matchId, true)
                         added = true
+                        // Vor dem Austragen aus der Vormerkung: Das Publikum bleibt ohne Lücke bekannt.
+                        setConfirmed(profileId, matchId, confirmed(profileId, matchId) + visitorId)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: CloudException) {
@@ -150,41 +165,45 @@ class VisitorQueue(
 }
 
 /**
- * Live-Stand für Visitor während des Spiels: Nach einer Zähländerung eines Matches mit Visitor höchstens alle
- * [intervalMs] einen Abgleich ([syncNow]), damit Zuschauer nicht erst am Matchende etwas sehen. Ohne Visitor nichts.
+ * Live-Upload (plan-live-mitspieler §3.1, E2): Jedes laufende Match eines angemeldeten Kontos, das dieses Gerät (oder
+ * seine Uhr) zählt, geht sofort beim ersten Sehen hoch (Kopf, löst auch `match_shared` aus), danach nach jeder
+ * Zähländerung höchstens alle [intervalMs]. Zählt ein anderes Konto (nach einer Übergabe), lösen gezogene Events
+ * keinen Upload aus – sonst stieße jeder Abgleich den nächsten an. Ein
+ * geplanter Abgleich nimmt alle Änderungen bis zu seinem Lauf mit, deshalb plant eine Änderung davor nichts Neues.
+ * [schedule] plant einen Abgleich nach der Wartezeit (Host: JobScheduler mit Netzbedingung, übersteht Doze).
  */
-class LiveVisitorUpload(
-    private val queue: VisitorQueue,
+class LiveScoreUpload(
     private val nowMs: () -> Long,
-    /** Führt den Block nach der Wartezeit aus (Host: Coroutine mit `delay`). */
-    private val schedule: (delayMs: Long, run: () -> Unit) -> Unit,
+    private val schedule: (profileId: String, delayMs: Long) -> Unit,
     private val intervalMs: Long = INTERVAL_MS,
-    private val syncNow: () -> Unit,
 ) {
-    private val counts = mutableMapOf<String, Int>()
-    private var lastSyncMs: Long? = null
-    private var armed = false
+    private val counts = mutableMapOf<String, Pair<Int, Boolean?>>()
+    private var plannedAtMs: Long? = null
 
-    /** Stand eines laufenden Matches; nur eine geänderte [eventCount] zählt als Zähländerung. */
+    /**
+     * Stand eines laufenden Matches; nur ein neues Match, eine geänderte [eventCount] oder eine geänderte Erreichbarkeit
+     * des Zählers ([scorerConnected], Live-Stand „Zähler offline“) zählt, und nur, wenn eines meiner Geräte zählt ([scoring]).
+     */
     fun onScore(
         profileId: String?,
         matchId: String,
         eventCount: Int,
+        scoring: Boolean,
+        scorerConnected: Boolean? = null,
     ) {
-        val previous = counts.put(matchId, eventCount)
-        if (profileId == null || previous == null || previous == eventCount) return
-        if (armed || !queue.isWatched(profileId, matchId)) return
-        armed = true
-        val wait = lastSyncMs?.let { it + intervalMs - nowMs() }?.coerceAtLeast(0) ?: 0
-        schedule(wait) {
-            armed = false
-            lastSyncMs = nowMs()
-            syncNow()
-        }
+        val stand = eventCount to scorerConnected
+        val previous = counts.put(matchId, stand)
+        if (profileId == null || !scoring || previous == stand) return
+        val now = nowMs()
+        val planned = plannedAtMs
+        if (planned != null && planned > now) return
+        val at = if (planned == null) now else maxOf(now, planned + intervalMs)
+        plannedAtMs = at
+        schedule(profileId, at - now)
     }
 
     companion object {
-        const val INTERVAL_MS = 30_000L
+        const val INTERVAL_MS = 10_000L
     }
 }
 

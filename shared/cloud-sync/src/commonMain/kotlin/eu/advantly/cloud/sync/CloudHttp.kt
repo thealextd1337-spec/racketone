@@ -271,6 +271,14 @@ internal class CloudHttp(
                 "visitor_must_be_friend",
                 "already_member",
                 "visitor_limit_reached",
+                // Zählen weitergeben (F17, plan-live-mitspieler §3.4)
+                "scorer_not_allowed",
+                "is_visitor",
+                "cannot_invite_self",
+                "no_pending_invitation",
+                "device_not_owned",
+                "device_owned_by_other",
+                "paired_device_unknown",
             )
     }
 }

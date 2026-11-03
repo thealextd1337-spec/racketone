@@ -96,7 +96,7 @@ import eu.advantly.data.MatchRecord as StoredMatch
  * Mehrere Matches (F22): [openMatches] spiegelt alle offenen Matches der Session, [active] das fokussierte; [select]
  * wechselt die Live-Ansicht. Nach einem App-Neustart öffnet der Adapter **alle** noch laufenden Matches wieder (erreichbar
  * zum Fortsetzen, Beenden, Abbrechen, Löschen); in den Fokus kommt nur das zuletzt geänderte und nur, wenn es höchstens
- * 12 h alt ist.
+ * 12 h alt ist. Laufende Matches anderer Konten (Mitspieler-Replikate) öffnet die Session nicht, sie sind hier nur lesbar.
  * „Stand vor X s“ misst er monoton ([monotonic]); den letzten Kontakt zum Zähler merkt er sich je Match in den Settings,
  * damit das Alter einen Neustart übersteht. Ohne gemerkten Kontakt ist es unbekannt (nicht 0).
  *

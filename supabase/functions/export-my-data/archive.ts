@@ -9,8 +9,10 @@ type Row = Record<string, unknown>;
 const encoder = new TextEncoder();
 
 // Feste Dateinamen und Spalten; verschachtelte Fachobjekte bleiben verlustfrei als JSON-Zellen.
+// deferredLiveMatches: laufende Matches, die wegen einer Blockierung mit dem Ersteller erst nach Matchende im Export
+// stehen (20261102000400); nur die Anzahl.
 export const COLUMNS: Record<string, string[]> = {
-  export: ["exportedAt", "blockedCount"],
+  export: ["exportedAt", "blockedCount", "deferredLiveMatches"],
   profile: [
     "id",
     "alias",

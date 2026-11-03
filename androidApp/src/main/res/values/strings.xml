@@ -21,4 +21,32 @@
     <string name="installation_error_body">Local data could not be checked. Counting, device sync and account features are paused. Try again to repeat this check. Existing match data is kept.</string>
     <string name="installation_error_retry">Try again</string>
     <string name="installation_loading">Checking local data…</string>
+    <!-- Push (Plan Live §3.3): Text entsteht lokal aus Art und Freundes-Cache; ohne Namen neutral -->
+    <string name="push_channel_friends">Friends</string>
+    <string name="push_channel_friends_description">Friend requests and accepted requests</string>
+    <string name="push_channel_matches">Matches</string>
+    <string name="push_channel_matches_description">You were added to a match or invited to watch</string>
+    <string name="push_channel_scoring">Keeping score</string>
+    <string name="push_channel_scoring_description">Requests to keep score, answers and scorer changes</string>
+    <string name="push_friend_request">%1$s wants to be friends</string>
+    <string name="push_friend_request_neutral">You have a new friend request</string>
+    <string name="push_friend_accepted">%1$s accepted your friend request</string>
+    <string name="push_friend_accepted_neutral">Your friend request was accepted</string>
+    <string name="push_player_assigned">%1$s added you to a match</string>
+    <string name="push_player_assigned_neutral">You were added to a match</string>
+    <string name="push_match_shared">%1$s shared a match with you</string>
+    <string name="push_match_shared_neutral">A match was shared with you</string>
+    <string name="push_visitor_invited">%1$s invites you to watch a match</string>
+    <string name="push_visitor_invited_neutral">You were invited to watch a match</string>
+    <string name="push_scorer_invited">%1$s asks you to keep score</string>
+    <string name="push_scorer_invited_neutral">You were asked to keep score</string>
+    <string name="push_scorer_responded">%1$s answered your request to keep score</string>
+    <string name="push_scorer_responded_neutral">Your request to keep score was answered</string>
+    <string name="push_scorer_changed">%1$s changed the scorer of your match</string>
+    <string name="push_scorer_changed_neutral">The scorer of a match changed</string>
+    <string name="push_open">Tap to open</string>
+    <string name="live_relay_channel">Live score</string>
+    <string name="live_relay_channel_description">Shown while your watch keeps score and others follow live</string>
+    <string name="live_relay_title">Sharing live score</string>
+    <string name="live_relay_text">Your watch is keeping score – teammates and spectators see it live.</string>
 </resources>
