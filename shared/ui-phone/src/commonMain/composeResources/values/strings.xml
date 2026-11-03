@@ -703,6 +703,8 @@
     <string name="whats_new_12_2">Hand over scoring: as the creator you can hand scoring over to a player – to their phone or watch.</string>
     <string name="whats_new_12_3">Push notifications (optional): for invitations, friend requests and when you are asked to score. Turn them on in your profile under “Notifications”.</string>
     <string name="whats_new_12_4">More safety: heart rate histories now belong to your account, and deletions reliably reach your watch too.</string>
+    <string name="whats_new_13_1">Cloud backup fixed: your matches now really reach the cloud again – the basis for live, shared matches and notifications for your friends.</string>
+    <string name="whats_new_13_2">Please confirm the updated privacy policy (version 9) when asked – until then your matches are not backed up.</string>
     <string name="device_repair">Re-pair watches</string>
     <string name="device_repair_hint">Use this if a watch was lost or replaced. Every watch then has to confirm pairing again on the watch itself; its data stays.</string>
     <string name="device_repair_confirm_title">Re-pair all watches?</string>

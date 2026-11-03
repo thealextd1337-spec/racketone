@@ -1,0 +1,4 @@
+Neu in 0.6.1:
+• Cloud-Sicherung repariert: Matches mit dir selbst oder unbenannten Plätzen wurden bisher nicht hochgeladen.
+• Abgelehnte Uploads werden nicht mehr jede Minute wiederholt.
+Bitte testen: Match mit einem Freund, er bekommt Live-Stand und Benachrichtigung.
