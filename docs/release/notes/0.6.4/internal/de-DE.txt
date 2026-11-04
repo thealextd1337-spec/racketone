@@ -2,4 +2,5 @@ Neu in 0.6.4:
 • Matches von Freunden, in denen du im anderen Team stehst: Siege, Games und Bilanz zählen jetzt richtig für dich.
 • Match-Detail: Du stehst immer auf der Seite „Wir“.
 • Server: Einladungslinks abgesichert (gelöschte Gäste, schon befreundet).
+• Server: Beendete Spiele und Unentschieden verschwinden nach dem Endstand-Abgleich bei Freunden und Zuschauern aus „Live“.
 Bitte testen: Freund legt ein Match an, du in Team B – Startseite, Verlauf und Bilanz prüfen.
