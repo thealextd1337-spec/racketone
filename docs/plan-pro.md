@@ -4,6 +4,8 @@
 > [06 §5/§7](06-marktanalyse.md), [01 §5.4](01-architektur.md), [03 §1.7/§3.3.6/§8](03-backend-datenmodell.md),
 > [Veröffentlichungsplan](release/veroeffentlichungsplan.md), Nutzerentscheid „Gesundheitsdaten nur lokal“ (02.11.2026) ·
 > Stand Code: `w12/plaene` auf Basis 0.6.3 (Build 16) · Turnierprodukte: [plan-turnier.md](plan-turnier.md) setzt auf §4 auf
+> · Überarbeitet nach Review (Fable, Astra): Website-Kündigung mit Bestätigung, Ort-Sichtbarkeit (E8) vor Erfassung,
+> Supabase Pro, Gebühren, Testtracks, Zustandsautomat Turnier-Pass (§4.3.1)
 
 ## 1. Ziel und Abgrenzung kostenlos/Pro
 
@@ -84,10 +86,10 @@ Turniere freischaltet. Technisch ist das nur eine Katalogzeile bzw. eine Regel i
 ### 2.3 Lücken, die Pro vorher schließen muss
 
 1. **Perspektive:** `MatchSummary.outcome()` und alle Kennzahlen setzen voraus, dass Seite A das eigene Team ist
-   (`MatchPorts.kt`: „Side A ist immer das Team des Geräte-Besitzers“). Bei Matches, die ein Freund angelegt hat und in
-   denen ich in Team B stehe, ist das **zu prüfen**. Wenn die Replik nicht spiegelt, werden diese Matches heute schon falsch
-   gezählt. Das ist ein eigener Fix für alle (frei) und Voraussetzung für §3.1/§3.2.
-2. **Ort:** `MatchMeta.venue` existiert, wird aber nirgends eingegeben. Belag gibt es nur bei Tennis im Handy-Assistenten,
+   (`MatchPorts.kt`). Matches eines Freundes, in denen ich in Team B stehe, werden deshalb falsch gezählt. **Wird in 0.6.4
+   als Fehlerkorrektur für alle behoben.** Pro setzt darauf auf (§3.1/§3.2).
+2. **Ort:** `MatchMeta.venue` existiert, wird aber nirgends eingegeben. Ginge es so in `matches.meta`, sähen es auch
+   Freunde im Feed (§3.3). Belag gibt es nur bei Tennis im Handy-Assistenten,
    Halle/Draußen bei allen Sportarten. Die Uhr erfasst keinen Belag (§3.3).
 3. **Rechenaufwand:** `MatchStats` entsteht je Match per Replay (`MatchStatisticsCache` nur im Speicher). Für Trends über
    Hunderte Matches braucht es einen abgeleiteten lokalen Kennzahlen-Cache (§3.4).
@@ -162,11 +164,16 @@ liefert nur die Berechtigung. Das passt zu „Gesundheit nur lokal“, funktioni
 
 **Daten:** Meta lokal. **Berechnung:** auf dem Gerät.
 
-**Datenschutz:**
+**Datenschutz (E8 vor der Ort-Erfassung entscheiden):**
 - Der Ort ist personenbezogen (Aufenthaltsmuster). Die Datenschutzerklärung nennt den „optional eingegebenen Ort“ schon
   (§3.1, §4.2), das Upload-Format ebenfalls.
-- Offen ist, ob Freunde und Zuschauer den Ort sehen (§9 E8). Empfehlung: Der Ort bleibt in geteilten Ansichten
-  ausgeblendet.
+- **„In der App ausblenden“ reicht nicht:** `sync_pull` liefert `m.meta` samt `venue` auch bei `access = 'feed'`, und der
+  `MatchCreated`-Payload trägt `meta` in die Events.
+- Bei „privat“ (Empfehlung E8): Der Ort geht **nicht** in `meta` und nicht in Event-Payloads, sondern in ein eigenes
+  Feld (z. B. `matches.owner_venue`), das nur der Ersteller liest und schreibt. Alternativ serverseitig aus allen
+  Lesewegen filtern. In beiden Fällen pgTAP über alle Lesewege und Payloads: `sync_pull` (Mitglied, Feed),
+  Events, `visitor_view`/Zuschauer, Live, Turnierübersicht, Kontoexport (nur eigener Ort).
+- Ohne Entscheidung E8 wird kein Ort erfasst.
 
 **Gesundheit:** keine.
 
@@ -228,7 +235,7 @@ liefert nur die Berechtigung. Das passt zu „Gesundheit nur lokal“, funktioni
 | | Direkt (Play Billing + Edge Functions) | RevenueCat |
 |---|---|---|
 | Datenschutz | keine weitere Stelle; nur Google/Apple als Zahlungsanbieter | zusätzlicher US-Auftragsverarbeiter, neue Fassung von Datenschutzerklärung und AVV |
-| Kosten | 0 € (Edge Functions im Free-Kontingent) | frei bis 2.500 $ MTR, danach 1 % (03 §1.7, Drittquelle) |
+| Kosten | keine zusätzlichen (Edge Functions im Supabase-Kontingent; Supabase Pro ist ohnehin Voraussetzung, §7.2) | frei bis 2.500 $ MTR, danach 1 % (03 §1.7, Drittquelle) |
 | Aufwand | Play: mittel; Apple später: mittel | gering, Paywall-Werkzeuge inklusive |
 | Kontrolle | volle Kontrolle über Turnier-Bindung und Kontowechsel | Turnier-Einmalkäufe je Turnier über Metadaten möglich, aber umständlicher |
 
@@ -268,12 +275,11 @@ flowchart LR
   - `status` (`active`/`grace`/`on_hold`/`expired`/`revoked`), `limits jsonb`, `will_renew boolean`.
   - `source` bleibt unverändert: Die Testphase ist ein Store-Angebot (`play_store`), Pilot-Promo ist `promotional`.
   - Wird ausschließlich aus `store_purchases` bzw. Promo-Einträgen abgeleitet (Funktion `private.recompute_entitlements(profile)`).
-- **Turnier:** Einmalkäufe gelten für ein **Turnier**, nicht für ein Konto. Dafür kommt die Tabelle
-  `public.tournament_licenses (tournament_id PK, grant_key, limits, purchase_id, granted_by, created_at)` dazu. Lesen dürfen
-  alle `tournament_staff` des Turniers, schreiben nur `service_role`. Legt `plan-turnier.md` die Stufe als Spalten am
-  Turnier ab (`tier*`), gilt dieselbe Regel; die Tabelle entfällt dann. Die Grenzen prüft der **Server** in den Turnier-RPCs
-  (z. B. Anzahl Plätze), nicht nur der Client. Felder, Stufen und Grenzen legt `plan-turnier.md` fest. Dieser Plan liefert
-  Katalog, Kaufprüfung und Projektion.
+- **Turnier:** Einmalkäufe gelten für ein **Turnier**, nicht für ein Konto. Die Stufe steht **ausschließlich** in
+  `public.tournament_licenses (tournament_id PK, grant_key, limits, source ('pass'|'pro'|'promotional'), purchase_id,
+  locked_at, revoked_at, created_at)`; ohne Zeile gilt „frei“. Keine `tier*`-Spalten an `tournaments`. Lesen dürfen
+  Leitung und `tournament_staff`, schreiben nur `service_role`. Die Grenzen prüft der **Server** in den Turnier-RPCs.
+  Stufen und Grenzen legt `plan-turnier.md` fest, Katalog, Kaufprüfung und Lebenszyklus (§4.3.1) dieser Plan.
 - **RPC `cloud_entitlements_v1()`**: eigene Konto-Entitlements plus Serverzeit, im Muster der übrigen `cloud_*_v1`
   (Binding, Versionssperre). Der Kontoexport enthält weiterhin `entitlements`, ab jetzt ohne Tokens.
 - **Admin:** `ops`-Funktionen mit Audit für Support: Promo vergeben/entziehen, Kauf einem Konto neu zuordnen (§4.5).
@@ -301,9 +307,7 @@ flowchart LR
        altes Token ablösen).
      - Danach schreibt er `store_purchases`, berechnet die Entitlements neu und **bestätigt (acknowledge) serverseitig**.
      - Ohne Bestätigung innerhalb von 3 Tagen erstattet Google automatisch.
-     - Turnierpässe bindet er genau einmal an ein Turnier und verbraucht (consume) sie danach.
-     - Scheitert die Bindung, bleibt der Kauf unbestätigt, und Google erstattet nach 3 Tagen. Der Nutzer verliert also
-       kein Geld.
+     - Turnierpässe: Zustandsautomat §4.3.1.
   4. Die App lädt `cloud_entitlements_v1` neu. Die Freischaltung ist sichtbar, sobald der Server zustimmt.
 - **RTDN:**
   - Pub/Sub-Thema im Google-Cloud-Projekt der App, Push-Abo auf die Edge Function `billing-play-rtdn` mit
@@ -315,15 +319,38 @@ flowchart LR
 - **Abgleich:** `billing-reconcile` (pg_cron, täglich):
   - Prüft Käufe mit `expires_at` in den nächsten/letzten 48 h und `pending` nach.
   - Liest `voidedpurchases.list` (Erstattungen und Rückbuchungen) und entzieht entsprechend.
-  - Deckt Ausfälle ab, etwa wenn Supabase Free pausiert und Pub/Sub nur begrenzt wiederholt.
+  - Deckt Ausfälle ab, etwa wenn eine Function scheitert und Pub/Sub nur begrenzt wiederholt.
 - **Zugang:**
   - Eigenes Dienstkonto `play-billing` mit Play-Console-Rechten „Finanzdaten ansehen“ und „Bestellungen und Abos
     verwalten“, nur für die App Advantly.
   - Getrennt vom Upload-Dienstkonto des Veröffentlichungsplans.
   - Secret `PLAY_BILLING_SERVICE_ACCOUNT_JSON` als Function-Secret (Dashboard, wie `FCM_SERVICE_ACCOUNT_JSON`).
-- **Gebühren:** In EWR/UK/US gilt seit 30.06.2026 für Auto-Abos 10 % Servicegebühr + 5 % Billing-Gebühr. Für andere
-  Käufe (z. B. Turnierpass) bei Neuinstallationen 20 % + 5 %. Externe Angebote und alternatives Billing sind im EWR möglich,
-  lohnen sich bei dieser Größe aber nicht (§9 E2).
+- **Gebühren (EWR/UK/US seit 30.06.2026):** Auto-Abos 10 % Service + 5 % Billing. Einmalkäufe (z. B. Turnierpass)
+  20 % (neue Installation) bzw. 25 % (bestehende) + 5 %. **Für die ersten 1 Mio. USD Jahreserlös gilt für alle Arten
+  10 % + 5 %** (Quelle: Play-Console-Hilfe 16954621; ob eine Anmeldung nötig ist, in der Console prüfen). Für Advantly
+  heißt das realistisch: **15 % auf alles.** Externe Angebote und alternatives Billing lohnen sich nicht (§9 E2).
+
+#### 4.3.1 Turnier-Pass: Zustandsautomat (verbindlich, gilt auch für `plan-turnier.md`)
+
+| Zustand | Bedeutung | Übergang |
+|---|---|---|
+| `pending` | Play meldet PENDING | → `verified`, sobald bezahlt; Abbruch → Ende |
+| `verified` | Token geprüft, Zeile in `store_purchases` (`purchase_token_hash` eindeutig), noch keinem Turnier zugeordnet, **nicht bestätigt** | Bindung gelingt → `bound`; keine Bindung binnen 3 Tagen → `unbound` |
+| `bound` | In **einer** Transaktion: Lizenzzeile in `tournament_licenses`, `store_purchases.scope_id` gesetzt | Server bestätigt und verbraucht (`acknowledge` + `consume` über die API) → `consumed` |
+| `consumed` | Endzustand des Kaufs | Erstattung/Voided → `revoked` |
+| `unbound` | bezahlt, aber kein Turnier | siehe Entscheidung E18 |
+| `revoked` | erstattet oder zurückgebucht | Lizenz nur entzogen, solange das Turnier `planned` ist |
+
+- **Verbrauchen nur der Server**, die App ruft nie `consume`. Die App sendet Token + Turnier-ID; Wiederholungen beim
+  App-Start (`queryPurchasesAsync`) sind sicher.
+- **Idempotenz über `purchase_token_hash`:** Derselbe Token mit demselben Turnier liefert dasselbe Ergebnis, mit einem
+  anderen Turnier `pass_already_bound`. Fremde `obfuscatedExternalAccountId` → abgelehnt.
+- **Bindung scheitert** (Turnier gelöscht, nicht Leitung, Turnier hat schon Stufe L): Zustand bleibt `verified`, die App
+  bietet ein anderes eigenes Turnier an.
+- **Laufendes Turnier behält seine Stufe**, auch bei Erstattung oder Pro-Ablauf (`locked_at` beim Start). Ein noch
+  geplantes fällt auf „frei“ zurück; Daten über der Grenze bleiben gespeichert.
+- Pro-Stufe: Startet die Leitung ein Turnier mit aktivem Pro, schreibt der Server beim Start eine Lizenzzeile mit
+  `source = 'pro'`.
 
 ### 4.4 Apple (später, StoreKit 2)
 
@@ -389,7 +416,7 @@ flowchart LR
   Ablauf in Minuten durchspielen. `test_purchase` (`purchaseType = TEST`) markieren. Testkäufe zählen nie in Statistiken.
 - Staging: gleiche Edge Functions, eigenes Pub/Sub-Thema. Ein Produktions-Supabase gibt es noch nicht (Staging ist die
   einzige Umgebung).
-- Turnierpass mit Bindungsfehler gezielt testen (keine Bestätigung → Erstattung nach 3 Tagen).
+- Turnierpass mit Bindungsfehler gezielt testen (§4.3.1, E18).
 
 ### 4.7 Kündigung, Zahlungsverzug, Grace Period, Erstattung
 
@@ -401,7 +428,7 @@ flowchart LR
 | `RECOVERED`/`RESTARTED` | `active` | ja | – |
 | `EXPIRED` | `expired` | nein | einmaliger, schließbarer Hinweis |
 | `REVOKED`, Voided Purchase (Erstattung/Rückbuchung) | `revoked` | nein, sofort | kein Vorwurf, neutraler Text |
-| Turnierpass erstattet | Lizenz entzogen | – | Turnier fällt auf Gratisgrenze; **laufende Matches werden nie abgebrochen**, nur Neuanlage über der Grenze gesperrt (Abstimmung `plan-turnier.md`) |
+| Turnierpass erstattet | `revoked` (§4.3.1) | – | Geplantes Turnier fällt auf die Gratisgrenze; **laufendes oder beendetes Turnier behält seine Stufe** |
 
 Erstattungen wickelt Google ab (eigene Richtlinie). Kulanzerstattungen gibt der Support über die Play Console
 (Bestellverwaltung), der Server sieht sie über RTDN und den Abgleich.
@@ -488,18 +515,27 @@ Erstattungen wickelt Google ab (eigene Richtlinie). Kulanzerstattungen gibt der 
   - Ob bei In-App-Abos über Google Play der App-Anbieter oder Google verpflichtet ist, ist **nicht höchstrichterlich
     geklärt**.
   - **Empfehlung (vorsorglich):**
-    - In der App „Abo kündigen“ in Profil → Advantly Pro, direkt ohne Rückhalteschritte.
-    - Auf der Website (ohne Login) `advantly.eu/abo-kuendigen.html` bzw. `en/cancel-subscription.html`. Dort ein Formular
-      „Verträge hier kündigen“ mit Bestätigungsseite „Jetzt kündigen“: E-Mail des Kontos, Art der Kündigung, Zeitpunkt.
-    - Eine Edge Function kündigt über die Play Developer API zum Laufzeitende und schickt eine Bestätigung in Textform per
-      E-Mail (Resend, vorhanden).
-    - Der Link steht im Footer jeder Seite.
+    - In der App „Abo kündigen“ in Profil → Advantly Pro, direkt ohne Rückhalteschritte, Store-Mutation sofort (Konto ist
+      angemeldet).
+    - Auf der Website (ohne Login) `advantly.eu/abo-kuendigen.html` bzw. `en/cancel-subscription.html`, Link im Footer
+      jeder Seite. **Keine automatische Kündigung anhand einer eingegebenen E-Mail-Adresse** (sonst kann jeder fremde Abos
+      kündigen). Ablauf:
+      1. Formular „Verträge hier kündigen“ (Kontakt-E-Mail, Art, Zeitpunkt) → Bestätigungsseite „Jetzt kündigen“.
+      2. Die Erklärung wird **fristwahrend mit Eingangszeit gespeichert** und sofort in Textform bestätigt
+         (Eingangsbestätigung an die angegebene Adresse, neutral formuliert).
+      3. Gehört die Adresse zu einem Konto, geht ein Bestätigungslink an die **Kontoadresse**. Erst nach Klick (oder nach
+         Zuordnung durch den Support) kündigt eine Edge Function über die Play Developer API zum Laufzeitende, bezogen
+         auf den Eingangszeitpunkt.
+      4. **Neutrale Antworten** (gleich, ob ein Konto oder Abo existiert), **Rate-Limit** je IP und Adresse,
+         **Audit-Zeile** je Schritt.
+    - Ob dieser zweistufige Weg § 312k genügt, ist Teil der anwaltlichen Prüfung (E9).
 - **Widerrufsfunktion (§ 356a BGB DE seit 19.06.2026; AT § 13a FAGG durch VerbRÄG 2026, Stichtag laut Quellen 19.06.
   bzw. 01.10.2026, im RIS prüfen):**
   - Gilt für online geschlossene Fernabsatzverträge, auch in Apps.
   - Empfehlung: Unter Profil → Advantly Pro „Vertrag widerrufen“ mit Bestätigungsschritt, solange eine Widerrufsfrist
-    läuft. Wirkung: Kündigung plus Erstattungsantrag (Google-Erstattung bzw. Kulanzerstattung über die Console).
-  - Gleicher Weg auf der Website-Seite.
+    läuft. Der Widerruf ist eine **eigene Erklärung** (nicht nur eine Kündigung) mit sofortiger **Eingangsbestätigung**
+    in Textform. Wirkung: Kündigung plus Erstattung (Google-Erstattung bzw. Kulanzerstattung über die Console).
+  - Website: dieselbe zweistufige Strecke wie bei der Kündigung, als eigene Erklärung „Vertrag widerrufen“.
 - **Widerrufsrecht:**
   - Bei digitalen Dienstleistungen bleibt das 14-tägige Widerrufsrecht grundsätzlich bestehen, mit anteiligem Wertersatz
     bei ausdrücklichem Wunsch nach sofortigem Beginn.
@@ -514,7 +550,7 @@ Erstattungen wickelt Google ab (eigene Richtlinie). Kulanzerstattungen gibt der 
 - **Neue Daten:**
   - Kaufbezug: Produkt, Status, Ablauf, Bestellnummer, Purchase-Token (verschlüsselt/gehasht), Store, Testkauf-Flag,
     HMAC-Kennung an Google.
-  - Bei Website-Kündigung die angegebene E-Mail und der Zeitpunkt.
+  - Bei Website-Kündigung bzw. -Widerruf: Erklärung, angegebene E-Mail, Eingangszeit, Bestätigungsstatus, Audit.
   - **Keine** Zahlungsmittel, keine Adresse, kein Name von Google.
   - Rechtsgrundlage Art. 6 Abs. 1 lit. b DSGVO, Speicherdauer Laufzeit + 13 Monate (03 §8.1).
 - **Empfänger:**
@@ -562,7 +598,7 @@ Erstattungen wickelt Google ab (eigene Richtlinie). Kulanzerstattungen gibt der 
   - P3 ist nicht abgenommen: Puls-Zeitleiste ist da, aber Tracker-Import, DSFA-Abschluss, Puls-Qualität auf Pixel/Galaxy
     und Store-Texte stehen aus.
 - **Reihenfolge (Empfehlung):**
-  1. **Jetzt, ohne Kauf:** Free-Garantie, Gates, Ort-Erfassung, Kennzahlen-Cache, Perspektiven-Fix (§8.2 Phase A).
+  1. **Jetzt, ohne Kauf:** Free-Garantie, Gates, Kennzahlen-Cache, Ort-Erfassung nach E8 (§8.2 Phase A); Perspektiven-Fix kommt mit 0.6.4.
      Nützt sofort allen.
   2. **Pilot (12 × 14 Tage):** Pro-Funktionen (Phase B) mit Promo-Entitlement für Pilot-Tester, sichtbar als „Pro“.
      Gleichzeitig Abrechnung bauen und intern mit Lizenztestern testen (Phasen C–D).
@@ -585,6 +621,9 @@ Erstattungen wickelt Google ab (eigene Richtlinie). Kulanzerstattungen gibt der 
   Anbieters. Name und Adresse sind ohnehin im Impressum.
 - Produkte anlegen setzt ein hochgeladenes Bundle mit Billing-Bibliothek voraus (im internen Track genügt das). Produkte
   aktivieren, Base Plans veröffentlichen.
+- **Supabase Pro ist Voraussetzung für den Verkauf** (nicht Supabase Free): Free pausiert inaktive Projekte und hat keine
+  Backups. Kaufdaten, RTDN und Kündigungen brauchen Verfügbarkeit und Sicherung. Kosten etwa 25 $/Monat (vor dem Wechsel
+  aktuell prüfen). Nutzerentscheidung E17.
 - Pub/Sub: Google-Cloud-Projekt (das Firebase-Projekt `advantly-8ebb7` kann es sein) mit Thema; in der Console unter
   Monetarisierungseinrichtung das Thema eintragen; Dienstkonto `google-play-developer-notifications@system.gserviceaccount.com`
   als Publisher berechtigen.
@@ -592,10 +631,10 @@ Erstattungen wickelt Google ab (eigene Richtlinie). Kulanzerstattungen gibt der 
 ### 7.3 Muss der geschlossene Test (12 Tester × 14 Tage) vorher laufen?
 
 - **Für Entwicklung und Testkäufe: nein.** Lizenztester kaufen im internen Track.
-- **Für echte Verkäufe: ja, indirekt.** Echte Kunden erreicht nur der Produktions-Track. Den gibt es für private Konten,
-  die nach dem 13.11.2023 erstellt wurden, erst nach 12 Testern × 14 Tagen ununterbrochenem Opt-in und dem Antrag. Im
-  geschlossenen Test wären Käufe technisch möglich (echte Abbuchung), sind aber laut PLAN §1 vor P3 nicht vorgesehen.
-  Empfehlung: im Pilot nur Promo, keine Verkäufe.
+- **Für echte Verkäufe: technisch nein.** Auch interne und geschlossene Testtracks rechnen echte Käufe ab (alle, die
+  keine Lizenztester sind, zahlen). Breite Kundschaft erreicht aber nur der Produktions-Track, den es für private Konten
+  nach dem 13.11.2023 erst nach 12 Testern × 14 Tagen Opt-in gibt.
+- **Projektentscheidung (E15):** keine echten Verkäufe vor Produktion und P3-Gate (PLAN §1). Im Pilot nur Promo.
 
 ## 8. Tests, Phasen, Aufwand, Risiken
 
@@ -616,7 +655,9 @@ Erstattungen wickelt Google ab (eigene Richtlinie). Kulanzerstattungen gibt der 
     Kaskade bei Kontolöschung.
   - Deno-Tests der Edge Functions mit aufgezeichneten API-Antworten: Kauf, Verlängerung, Grace, Hold, Kündigung, Ablauf,
     Widerruf, Voided, Upgrade mit `linkedPurchaseToken`, fremde `obfuscatedExternalAccountId`, Pub/Sub-OIDC falsch/fehlend,
-    Turnierpass doppelt binden.
+    Turnierpass: jeder Übergang aus §4.3.1, gleicher Token doppelt, Erstattung bei geplantem vs. laufendem Turnier.
+  - Website-Kündigung: unbekannte Adresse → neutrale Antwort, keine Store-Mutation; erst Bestätigungslink kündigt;
+    Rate-Limit; Audit-Zeilen.
 - **Android:** JVM-Tests des `StoreBilling`-Adapters mit Fake-BillingClient (PENDING, USER_CANCELED, ITEM_ALREADY_OWNED,
   Service getrennt).
 - **Geräte:** Lizenztester im internen Track, mit Testkarten Kauf, Grace (abgelehnte Karte), Kündigung, Wiederherstellen
@@ -627,9 +668,9 @@ Erstattungen wickelt Google ab (eigene Richtlinie). Kulanzerstattungen gibt der 
 
 | Phase | Inhalt | Aufwand | Abhängig von |
 |---|---|---|---|
-| **A** Fundament (frei) | Feature-Register + `Gate` in `entitlements`, `FreeFeatureGuardTest`, `match_stats_cache`, Perspektiven-Prüfung/-Fix, Ort-Erfassung + Belag für Padel (der Belag-/Ort-Filter gehört zu B) | M (4–6 Agententage) | – |
+| **A** Fundament (frei) | Feature-Register + `Gate` in `entitlements`, `FreeFeatureGuardTest`, `match_stats_cache`, Ort-Erfassung + Belag für Padel (der Belag-/Ort-Filter gehört zu B) | M (4–6 Agententage) | Perspektiven-Fix (0.6.4); Ort erst nach E8 |
 | **B** Pro-Statistik | §3.1–3.6, Pro-Abzeichen, Vorschau mit Beispieldaten, Health-Trends lokal, PDF/CSV-Bericht | L (8–12) | A |
-| **C** Abrechnung Server | Migrationen (`billing_products`, `store_purchases`, `store_notifications`, `entitlements`-Erweiterung, `tournament_licenses`), `cloud_entitlements_v1`, Edge Functions verify/rtdn/reconcile, Pub/Sub, Dienstkonto, pgTAP + Deno-Tests, Admin-Funktionen | L (6–9) | Zahlungsprofil (§7.2) für echte Ende-zu-Ende-Tests |
+| **C** Abrechnung Server | Migrationen (`billing_products`, `store_purchases`, `store_notifications`, `entitlements`-Erweiterung, `tournament_licenses`), `cloud_entitlements_v1`, Edge Functions verify/rtdn/reconcile, Pass-Zustandsautomat, Pub/Sub, Dienstkonto, pgTAP + Deno-Tests, Admin-Funktionen | L (6–9) | Zahlungsprofil (§7.2) für echte Ende-zu-Ende-Tests; Supabase Pro vor dem Verkauf |
 | **D** Abrechnung App | Play Billing Library 8+ in `androidApp`, `StoreBilling`-Port, Paywall-Sheet, Pro-Seite im Profil, Wiederherstellen, Kontowechsel-Hinweis, Löschdialog-Warnung, Offline-Cache | M (5–7) | C |
 | **E** Recht und Console | TERMS 3, PRIVACY neu, Website-Seite + Kündigungsformular-Function, Data Safety, Health-apps-Erklärung, Steuerberatung, anwaltliche Prüfung §5.5 | M (3–4 + extern) | Nutzerentscheidungen §9 |
 | **F** Start | Promo-Entitlements Pilot, Messphase, gestaffelter Pro-Rollout | S | Produktion |
@@ -642,9 +683,10 @@ A und C können sofort parallel laufen. B nach A. D nach C. E parallel zu B–D,
 | Risiko | Gegenmaßnahme |
 |---|---|
 | Paywall-Frust, Gefühl „kostenlos wird weggenommen“ | Free-Garantie als Test und in den Nutzungsbedingungen, Pro nur Neues, Pilot-Promo, keine Pop-ups |
-| Falsche Statistik (Perspektive, Gäste, Abbrüche) zerstört Vertrauen in ein Bezahlprodukt | Perspektiven-Fix vor B, Regel-Tabellen, Mindestgrößen |
+| Falsche Statistik (Perspektive, Gäste, Abbrüche) zerstört Vertrauen in ein Bezahlprodukt | Perspektiven-Fix (0.6.4) vor B, Regel-Tabellen, Mindestgrößen |
 | Rechtsunsicherheit Kündigungs-/Widerrufsbutton bei Store-Abos | Vorsorglich eigener Kündigungsweg ohne Login, anwaltliche Prüfung vor Verkauf |
-| Fehlende RTDN (Supabase Free pausiert, Function-Fehler) | Täglicher Abgleich, Wiederherstellen beim Start, Offline-Toleranz, Idempotenz |
+| Fehlende RTDN (Function-Fehler, Ausfall) | Supabase Pro (§7.2), täglicher Abgleich, Wiederherstellen beim Start, Offline-Toleranz, Idempotenz |
+| Fremde kündigen per Website-Formular | Bestätigungslink an die Kontoadresse, neutrale Antworten, Rate-Limit, Audit (§5.5) |
 | Nutzer zahlt, Freischaltung bleibt aus | Serverseitige Bestätigung erst nach Schreiben, sonst Auto-Erstattung nach 3 Tagen; Support-Umhängen mit Audit |
 | Lokale Manipulation schaltet Pro frei | Bewusst in Kauf genommen (lokale Auswertungen); serverrelevante Grenzen (Turnier) prüft der Server |
 | Steuern/Schweiz | Verkauf erst in AT/DE/LI, CH nach Klärung; Steuerberatung vor dem Zahlungsprofil |
@@ -663,15 +705,17 @@ A und C können sofort parallel laufen. B nach A. D nach C. E parallel zu B–D,
 | E5 | Länder für den Verkauf | **AT, DE, LI** zuerst (Google Merchant of Record); CH nach Steuerklärung |
 | E6 | Testphase | **14 Tage**, Monat und Jahr, einmal je Google-Konto |
 | E7 | Pilot-Tester | Promo-Pro bis 3 Monate nach dem Pro-Start |
-| E8 | Ort in geteilten Ansichten (Feed, Zuschauer, Live) sichtbar? | **Nein**, nur in den eigenen Matches |
-| E9 | Eigener Kündigungsweg auf der Website (Formular + API-Kündigung) | **Ja**, vor dem ersten Verkauf in DE |
+| E8 | Ort für andere sichtbar? **Vor der Ort-Erfassung entscheiden** | **Nein, privat:** eigenes Feld nur für den Ersteller, nicht in `meta`/Events, Tests über alle Lesewege (§3.3) |
+| E9 | Eigener Kündigungs- und Widerrufsweg auf der Website | **Ja**, zweistufig mit Bestätigungslink an die Kontoadresse (§5.5), vor dem ersten Verkauf in DE, anwaltlich prüfen |
 | E10 | Offline-Toleranz nach Ablauf | **72 h** |
 | E11 | Kontolöschung mit aktivem Abo | Warnung im Dialog + automatische Kündigung zum Laufzeitende bei endgültiger Löschung, keine Erstattung |
 | E12 | Lifetime- oder Einmalkauf für Pro | **Nein** (06 §7); später höchstens begrenzt prüfen |
 | E13 | Turnierprodukte | Einmalkauf je Turnier als verbrauchbares Produkt + optional Veranstalter-Abo; Grenzen und Preise in `plan-turnier.md`, Abrechnung nach §4 |
 | E14 | Pro auf der Uhr | **Nein**, die Uhr bleibt paywallfrei |
-| E15 | Zeitpunkt | Pro-Verkauf frühestens 4–8 Wochen nach dem Produktionsstart; Phasen A und C sofort |
+| E15 | Zeitpunkt | Keine echten Verkäufe in Testtracks; Pro-Verkauf frühestens 4–8 Wochen nach dem Produktionsstart; Phasen A und C sofort |
 | E16 | Rechtsform/Zahlungsprofil | Vor dem Anlegen mit Steuerberatung klären (Gewerbe, UID, Kleinunternehmer) |
+| E17 | Supabase-Tarif für den Verkauf | **Supabase Pro** vor dem ersten Verkauf (Verfügbarkeit, Backups) |
+| E18 | Bezahlter, aber nicht gebundener Turnier-Pass | **Erstattung:** nicht bestätigen, Google erstattet nach 3 Tagen; die App wiederholt die Bindung bis dahin. Alternative: bestätigen und als Guthaben mit Frist (z. B. 90 Tage) führen, danach Erstattung |
 
 ## 10. Quellen (Abruf 04.11.2026)
 

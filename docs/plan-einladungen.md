@@ -1,8 +1,10 @@
 # Plan Einladungen: Freund per QR-Code oder Link, Gast übernimmt sich selbst
 
 > Status: Entwurf 2026-11-04 · Bezug: PLAN P2 („Freundschaften per Suche, QR und Einladungslink“, „Gäste-Claim per Link“),
-> p2-plan P2-D/P2-F, 03 §6.1/§6.3, 0.6.3 §3.5 (Gast mit Freund verknüpfen), 0.6.4 (Kontolöschung des verknüpften Freundes)
-> · Vorschlag Version 0.7.0, Build 18 (versionCodes 181/182), nach 0.6.4
+> p2-plan P2-D/P2-F, 03 §6.1/§6.3, 0.6.3 §3.5 (Gast mit Freund verknüpfen), 0.6.5 (`plan-0.6.4.md`, Kontolöschung des
+> verknüpften Freundes) · Vorschlag Version 0.7.0, nächster freier Build nach 0.6.4 (Build 17) bzw. 0.6.5
+> · Überarbeitet nach Review (Fable, Astra): QR über Plattform-Bibliotheken, nur Fragment-Link, Token-Lebenszyklus,
+> S3/S4 vorgezogen in 0.6.4
 
 ## 1. Ziel und Nutzerfluss
 
@@ -23,12 +25,12 @@ Beide Wege nutzen **einen** Link-Typ: `https://advantly.eu/i/#<token>` (siehe §
    - **App installiert, Konto aktiv:** Android öffnet Advantly direkt (verifizierter App Link). Die App wechselt in den
      Freunde-Tab und zeigt die Vorschau „Freundschaft mit Alex?“ (Alias aus `preview_invite`). „Annehmen“ →
      `redeem_invite` → „Du bist jetzt mit Alex befreundet.“ Alex bekommt den Push `friend_accepted`.
-   - **App installiert, nicht angemeldet bzw. Onboarding unvollständig:** Die App merkt sich den Link (nur im Speicher und
-     im `SavedStateHandle`, nie in der Datenbank oder im Backup). Hinweis oben: „Eine Einladung wartet. Melde dich an, um
+   - **App installiert, nicht angemeldet bzw. Onboarding unvollständig:** Die App merkt sich den Link (Lebenszyklus
+     §3.4). Hinweis oben: „Eine Einladung wartet. Melde dich an, um
      sie anzunehmen.“ Danach normales Onboarding: Land → Geburtsdatum → Anmeldung → Alias/Benutzername → Zustimmung zu
      Nutzungsbedingungen und Datenschutz. Sobald der Freunde-Zugang `READY` ist, erscheint die Vorschau wie oben.
-     Geht der Prozess unterwegs verloren (z. B. Wechsel in die Mail-App für den Code), stellt der `SavedStateHandle` den
-     Link wieder her. Ist auch der weg, tippt Anja den Link einfach erneut an.
+     Beendet Android den Prozess unterwegs (z. B. Wechsel in die Mail-App für den Code), stellt der `SavedStateHandle`
+     den Link wieder her. Ist auch der weg, tippt Anja den Link einfach erneut an.
    - **Altersgrenze nicht erreicht oder Land gesperrt:** Es entsteht kein Konto. Die App verwirft den Link mit
      „Einladungen kannst du nur mit Konto annehmen.“
    - **App nicht installiert:** Der Browser öffnet die Fallback-Seite `advantly.eu/i/` (statisch, ohne Tracking). Sie zeigt
@@ -77,7 +79,7 @@ Beide Wege nutzen **einen** Link-Typ: `https://advantly.eu/i/#<token>` (siehe §
    - **Anja ist schon Alex' Freundin:** Claim geht normal, die Freundschaft bleibt.
    - **Test1 wurde inzwischen jemandem zugeordnet oder beansprucht:** „Test1 wurde schon übernommen.“
    - **Alex hat Test1 gelöscht oder Test1 ist redigiert** (Kontolöschung): „Diese Einladung ist nicht mehr gültig.“
-     Heute prüft `redeem_invite` `deleted_at` nicht (Lücke, §2.1).
+     `redeem_invite` lehnt gelöschte Gäste seit 0.6.4 ab (S3).
    - **Anja stand in einzelnen Matches schon mit Konto:** Diese Matches werden übersprungen. Die Anzahl nennt nur die
      übernommenen.
    - **Blockiert, abgelaufen, eigener Link:** wie §1.1.
@@ -108,8 +110,8 @@ Cloud-Bindung seit `20261018000100_cloud_device_binding.sql`, Redaktionssperre s
 - **Sicherheit:** Beide RPCs laufen unter `require_cloud_binding` (Versionssperre, Zustimmung, Gerätebindung, globale
   `lock_sync`), sind also wie die übrigen Freunde-RPCs direkt aufrufbar. Eigene `cloud_*_v1`-Hüllen sind nicht nötig
   (wie in 0.6.3 für `assign_player` festgestellt).
-- **Kontolöschung:** offene Einladungen werden zurückgezogen bzw. gelöscht, `used_by` geleert. 0.6.4 behandelt
-  beanspruchte Gäste wie zugeordnete.
+- **Kontolöschung:** offene Einladungen werden zurückgezogen bzw. gelöscht, `used_by` geleert. 0.6.5
+  (`plan-0.6.4.md`) behandelt beanspruchte Gäste wie zugeordnete.
 - **pgTAP 070** deckt den Glücksfall ab: Claim ohne Freundschaft, Matchanzahl, Freundschaft entsteht, Link nur einmal.
   **pgTAP 100** prüft das gemeinsame Budget.
 
@@ -119,8 +121,8 @@ Cloud-Bindung seit `20261018000100_cloud_device_binding.sql`, Redaktionssperre s
 |---|---|---|
 | S1 | `preview_invite(token)` (neu, nur lesend) | Empfänger muss vor dem Einlösen sehen, von wem und wofür (§4). Heute gibt es nur Einlösen. |
 | S2 | `revoke_invite(id)` (neu) | Widerruf ist geplant (03 §6.3), aber es gibt keinen RPC. |
-| S3 | `redeem_invite`: Gast mit `deleted_at` ablehnen | Ein vom Anleger gelöschter Gast lässt sich heute noch beanspruchen. |
-| S4 | `redeem_invite` bei Freundes-Link und bestehender Freundschaft | Heute: Link verbraucht, falscher Push „hat deine Anfrage angenommen“. Neu: Ergebnis `alreadyFriends`, kein Verbrauch, kein Push. |
+| S3 | ~~`redeem_invite`: Gast mit `deleted_at` ablehnen~~ | **Erledigt in 0.6.4** (Server-Sicherheitsfix). |
+| S4 | ~~`redeem_invite` bei Freundes-Link und bestehender Freundschaft: `alreadyFriends`, kein Verbrauch, kein Push~~ | **Erledigt in 0.6.4** (Server-Sicherheitsfix). Die App muss `alreadyFriends` auswerten. |
 | S5 | `create_invite`: ältere offene Claim-Links desselben Gasts zurückziehen | Sonst mehrere gültige Links für „Test1“. Der erste gewinnt, die anderen scheitern verwirrend. |
 | S6 | Obergrenze offener Einladungen je Konto (z. B. 50) | Das Minuten-Budget allein lässt die Tabelle wachsen. Fehler `too_many_open_invites`. |
 | S7 | Aufräumjob (pg_cron, wie `purge_push_outbox`) | Einladungen werden heute nie gelöscht. Vorschlag: 30 Tage nach Ablauf bzw. Nutzung löschen. |
@@ -163,11 +165,11 @@ Nicht nötig: neue Tabellen, Änderungen an `sync_pull` (Claims laufen über die
   - Der Teil nach `#` wird nicht an den Server geschickt. GitHub Pages sieht in seinen Logs nur `/i/`, nie den Token.
   - `/i/` ist eine echte statische Seite (`site/i/index.html`). Ein Pfad `/i/<token>` bräuchte dagegen den 404-Trick von
     GitHub Pages.
-  - Android-App-Links vergleichen nur Schema, Host und Pfad. `android:path="/i/"` passt, die App liest
-    `Uri.fragment`.
-- **Die App nimmt auch an:** `https://advantly.eu/i?t=<token>` (für den „In App öffnen“-Weg der Fallback-Seite, falls
-  später nötig) sowie den nackten Token im Feld „Freund hinzufügen“. Alles andere lehnt der Parser ab: fremder Host,
-  `http`, falsche Länge, keine Hex-Zeichen.
+  - Android-App-Links vergleichen nur Schema, Host und Pfad. `android:pathPrefix="/i/"` passt (auch `/i/index.html`),
+    die App liest `Uri.fragment`.
+- **Nur die Fragment-Variante.** Keine Query-Variante (`?t=`): Sie würde den Token an GitHub schicken und passt nicht zum
+  Intent-Filter. Zusätzlich nimmt die App den nackten Token im Feld „Freund hinzufügen“ an. Alles andere lehnt der
+  Parser ab: fremder Host, `http`, anderer Pfad, falsche Länge, keine Hex-Zeichen.
 - **Ein Link-Typ für Freund und Claim:** Die Art kennt nur der Server. Wer den Link sieht, erfährt ohne Konto nichts.
 - **Verworfen:**
   - Eigenes Schema `advantly://`: Messenger machen es nicht anklickbar, und es gibt keinen Fallback ohne App.
@@ -177,8 +179,8 @@ Nicht nötig: neue Tabellen, Änderungen an `sync_pull` (Claims laufen über die
   - `site/.well-known/assetlinks.json` mit `delegate_permission/common.handle_all_urls` für `eu.advantly`.
     Fingerabdrücke: der **App-Signaturschlüssel aus der Play Console** (Play App Signing) und zusätzlich der
     Upload-Schlüssel (`docs/release/play-console.md` §2).
-  - Intent-Filter in `androidApp` (nicht Wear): `VIEW`, `DEFAULT`, `BROWSABLE`, `https`, Host `advantly.eu`, Pfad `/i/`,
-    `android:autoVerify="true"`.
+  - Intent-Filter in `androidApp` (nicht Wear): `VIEW`, `DEFAULT`, `BROWSABLE`, `https`, Host `advantly.eu`,
+    `android:pathPrefix="/i/"`, `android:autoVerify="true"`.
   - Debug-Builds sind nicht verifiziert. Lokal hilft
     `adb shell pm set-app-links-user-selection --user cur --package eu.advantly true advantly.eu`.
 
@@ -197,18 +199,19 @@ Nicht nötig: neue Tabellen, Änderungen an `sync_pull` (Claims laufen über die
 
 ### 3.2 QR-Erzeugung
 
-- In `libs.versions.toml` gibt es **keine** QR- oder Barcode-Bibliothek.
-- **Empfehlung: kleiner QR-Encoder in `commonMain` von `ui-phone`**, gekürzt nach Nayuki „QR Code generator“ (MIT):
-  - nur Byte-Modus, Fehlerkorrektur M, automatische Version 1–10, Masken-Auswahl
-  - etwa 300 Zeilen, ohne neue Laufzeit-Abhängigkeit, läuft auf Android, iOS und Desktop
-  - Lizenzhinweis in der Datei und in den Drittanbieter-Hinweisen der App
-  - Zeichnen per Compose-`Canvas` mit Ruhezone, schwarz auf weiß, auch im Dark-Theme
+- In `libs.versions.toml` gibt es noch **keine** QR- oder Barcode-Bibliothek.
+- **Empfehlung: kein eigener Encoder, sondern Plattform-Bibliotheken per `expect`/`actual` in `ui-phone`:**
+  - `commonMain`: `expect fun qrModules(text: String): QrMatrix` (Boolean-Raster), Zeichnen per Compose-`Canvas` mit
+    Ruhezone, schwarz auf weiß, auch im Dark-Theme.
+  - Android und Desktop (JVM): `com.google.zxing:core` (`Encoder.encode`, Fehlerkorrektur M), Version in
+    `libs.versions.toml`, Lizenz Apache 2.0 in den Drittanbieter-Hinweisen.
+  - iOS: Core Image `CIQRCodeGenerator` (`inputCorrectionLevel = "M"`), Raster aus dem Ausgabebild lesen. Keine
+    Abhängigkeit.
 - Der Link hat 87 Zeichen (23 + 64), das ergibt QR-Version 6 (41 × 41 Module). Auf dem Handy-Bildschirm problemlos lesbar.
 - **Verworfen:**
-  - `zxing-core` als Laufzeit-Abhängigkeit: nur JVM, also nicht für iOS.
+  - Eigener Encoder: fehleranfällig und ohne Not zu pflegen.
   - KMP-QR-Bibliotheken mit eigener Compose-Abhängigkeit: Sie koppeln sich an die CMP-Version, und die Regel lautet
     „Kotlin, SKIE und CMP nur gemeinsam anheben“.
-  - `zxing-core` ist aber als **reine Test-Abhängigkeit** (`desktopTest`) sinnvoll, um erzeugte Codes zurückzulesen (§6).
 
 ### 3.3 QR-Scan
 
@@ -256,8 +259,13 @@ Nicht nötig: neue Tabellen, Änderungen an `sync_pull` (Claims laufen über die
     lösen. Der Link ist einmal nutzbar, ein neuer zieht alte zurück.
   - *Blockier-Orakel:* Blockiert, gelöscht und unbekannt ergeben dieselbe Antwort `invalid_invite` (heutiger Stand,
     bleibt so, auch in `preview_invite`).
-- **Ausstehender Link in der App:** Er liegt nur im Speicher und im `SavedStateHandle`, nie in SQLDelight, Prefs oder
-  Backup. Er wird nach Erfolg, Ablehnung, Abmeldung, Kontowechsel oder spätestens beim Prozessende verworfen.
+- **Lebenszyklus des ausstehenden Links (verbindlich):**
+  - Ablage nur im ViewModel und im `SavedStateHandle`, nie in SQLDelight, Prefs oder Backup.
+  - Er **überlebt** damit ein Prozessende durch Android, solange die Task besteht (Anmeldung, Mail-App, Onboarding).
+  - Er wird **verworfen** bei Erfolg, „Nicht jetzt“/„Nein“, endgültigem Status (`invalid`, `expired`, `used`,
+    `revoked`, `own`, `already_claimed`), Abmeldung, Kontowechsel, Altersgate ohne Konto und wenn der Nutzer die Task
+    schließt.
+  - Er **bleibt** bei offline, Rate-Limit, fehlender Zustimmung und gesperrtem Gerät.
 
 ### 3.5 Server-Änderungen im Detail (eine Migration)
 
@@ -279,10 +287,7 @@ Nicht nötig: neue Tabellen, Änderungen an `sync_pull` (Claims laufen über die
 - **`create_invite`** per Seam-Ersatz wie in den Vormigrationen (Signatur, Owner, ACL bleiben):
   - S5: offene Claim-Links desselben Gasts auf `revoked_at = now()` setzen
   - S6: Zählprüfung offener Einladungen
-- **`redeem_invite`** per Seam-Ersatz:
-  - S3: Gast `deleted_at is null`, sonst `invalid_invite`
-  - S4: Bei `friend` und bestehender Freundschaft `{kind, friendId, alreadyFriends: true}` zurückgeben, ohne `notify` und
-    ohne `used_at`
+- **`redeem_invite`:** S3 und S4 sind seit 0.6.4 auf dem Server. Diese Migration ändert `redeem_invite` nicht.
 - **S7** `private.purge_invites()` + `cron.schedule('advantly-invites-cleanup-v1', …)`.
 - **S8** `private.push_kinds()` um `player_claimed` erweitern. Ältere Apps ignorieren unbekannte Arten
   (`PushKind.entries.firstOrNull … ?: return null`).
@@ -297,7 +302,7 @@ Nicht nötig: neue Tabellen, Änderungen an `sync_pull` (Claims laufen über die
   `applinks:advantly.eu` im XcodeGen-Projekt und Weitergabe der URL im Swift-Host an eine `AdvantlyKit`-Facade.
 - Voraussetzung: Apple-Developer-Konto (noch offen). Prüfen, ob GitHub Pages die Datei ohne Endung mit passendem
   Content-Type ausliefert.
-- QR zeigen funktioniert dank `commonMain`-Encoder sofort. Scannen über die iOS-Kamera-App, ein In-App-Scanner
+- QR zeigen funktioniert über das iOS-`actual` (`CIQRCodeGenerator`) sofort. Scannen über die iOS-Kamera-App, ein In-App-Scanner
   (VisionKit) bräuchte `NSCameraUsageDescription`, deshalb erst einmal nicht.
 - Die Fallback-Seite ändert dann nur den iPhone-Satz.
 
@@ -414,9 +419,7 @@ Nicht nötig: neue Tabellen, Änderungen an `sync_pull` (Claims laufen über die
   - `preview_invite`: jeder Status, d. h. `ok`, `already_friends`, `already_claimed`, `own`, `expired`, `used`,
     `revoked`. Dazu `invalid` für unbekannt, blockiert in beide Richtungen, Ersteller in Löschung, gelöschter Gast und
     redigierter Gast. `invalid` liefert keine weiteren Felder. Felder je Art.
-  - `redeem_invite`:
-    - gelöschter Gast → `invalid_invite` (S3)
-    - Freundes-Link bei bestehender Freundschaft → `alreadyFriends`, `used_at` leer, keine Outbox-Zeile (S4)
+  - `redeem_invite` (S3/S4 testet schon 0.6.4):
     - Claim mit Freundschaft schon vorhanden
     - Claim überspringt Matches, in denen der Einlöser schon steht
   - `create_invite`:
@@ -433,20 +436,19 @@ Nicht nötig: neue Tabellen, Änderungen an `sync_pull` (Claims laufen über die
   - Antworten dekodieren (alle `status`-Werte), Fehlercodes durchreichen, ungültige Antworten → `cloud_response_invalid`
   - Kontowechsel: kein Netzaufruf
 - **Parser-Tests (`presentation-auth`, commonTest):**
-  - gültig: Fragment, `?t=`, nackter Token, Groß- und Kleinschreibung, Leerzeichen
-  - abgelehnt: fremder Host, `http`, Länge 63/65, Nicht-Hex, leerer Fragment
+  - gültig: Fragment (`/i/#…`, `/i/index.html#…`), nackter Token, Groß- und Kleinschreibung, Leerzeichen
+  - abgelehnt: fremder Host, `http`, anderer Pfad, Query `?t=`, Länge 63/65, Nicht-Hex, leeres Fragment
 - **ViewModel-Tests:**
-  - Link kommt abgemeldet an → bleibt über Anmeldung, Onboarding und Zustimmung → Vorschau → Annehmen → Ergebnis →
-    Link verworfen
+  - Link kommt abgemeldet an → bleibt über Anmeldung, Onboarding, Zustimmung und Prozessende (`SavedStateHandle`)
+    → Vorschau → Annehmen → Ergebnis → Link verworfen
   - Ablehnen verwirft den Link, ohne Netzaufruf zum Einlösen
   - Altersgate ohne Konto → `invite_needs_account`
   - Kontowechsel verwirft den Link
   - alle Fehlerstatus, Rate-Limit, offline (Link bleibt)
   - QR: Erneuern nach Ablauf und nach `friend_accepted`, kein Erneuern im Takt
   - Gästeliste: offener Link sichtbar, Zurückziehen, neuer Link ersetzt alten
-- **QR-Encoder (`ui-phone`, desktopTest):**
-  - Rundlauf mit `zxing-core` als reiner Testabhängigkeit, für Längen 1, 23, 87 und 150 sowie Grenzen je Version
-  - eine Golden-Matrix für einen festen Link (gegen versehentliche Änderungen)
+- **QR (`ui-phone`, desktopTest):** Rundlauf Erzeugen → Lesen mit dem zxing-Decoder für einen 87-Zeichen-Link. Das
+  iOS-`actual` prüft die CI (`iosSimulatorArm64Test`) mit demselben Link über `CIDetector`.
 - **UI-Tests (`desktopTest`, DE und EN):**
   - Block „Freunde einladen“, QR-Sheet mit Restzeit und „Neuer Code“
   - beide Einlöse-Dialoge mit Platzhaltern, Fehlertexte
@@ -473,14 +475,14 @@ Nicht nötig: neue Tabellen, Änderungen an `sync_pull` (Claims laufen über die
 
 ### 7.1 Zuschnitt (ein Feature-Release, drei Lieferschritte)
 
-1. **Migration (Server)** S1–S8 + pgTAP 490. Abwärtskompatibel, geht **vor** allem anderen auf Staging.
+1. **Migration (Server)** S1, S2, S5–S8 + pgTAP 490 (S3/S4 schon in 0.6.4). Abwärtskompatibel, geht **vor** allem anderen auf Staging.
 2. **`site/`-PR** (nur mit ausdrücklichem Auftrag):
    - `.well-known/assetlinks.json`
    - `i/index.html`
    - App-Datenschutzerklärung DE/EN als PRIVACY 10 + Katalogeintrag
    Muss live sein, **bevor** die App ausgerollt wird, weil Android beim Installieren bzw. Aktualisieren verifiziert.
    Die Datenschutz-Fassung wird mit dem App-Rollout aktiv (Ablauf wie in den bisherigen Releases).
-3. **App 0.7.0 (Build 18):** `cloud-sync`, `presentation-auth`, `ui-phone`, `androidApp`. Handy und Uhr aus demselben
+3. **App 0.7.0 (nächster freier Build):** `cloud-sync`, `presentation-auth`, `ui-phone`, `androidApp`. Handy und Uhr aus demselben
    Commit bauen (Uhr ohne Änderung). „Was ist neu?“ (`whats_new_18_*`, DE/EN): „Freunde per QR-Code oder Link
    einladen“, „Gäste übernehmen ihre Matches per Link“.
 
@@ -498,7 +500,7 @@ Später, eigene Releases: Install-Referrer (falls der Feldtest Hänger zeigt, E6
 | Datenschutztext DE/EN + Katalog | S (plus Abstimmung mit dir) |
 | `cloud-sync` Port + HTTP-Tests | S |
 | `presentation-auth` (Parser, ausstehender Link, Vorschau, QR-Zustand, Gäste) | M |
-| `ui-phone` (QR-Encoder + Tests, Sheet, Dialoge, Gastmenü, Strings) | M |
+| `ui-phone` (QR per `expect`/`actual` + Test, Sheet, Dialoge, Gastmenü, Strings) | M |
 | `androidApp` (Intent-Filter, Code Scanner, Push-Art) | S |
 | Gerätetest App Links + Feldtest | S |
 | **Gesamt** | **M–L** |
@@ -512,12 +514,12 @@ Später, eigene Releases: Install-Referrer (falls der Feldtest Hänger zeigt, E6
   eintragen.
 - **Erneute Zustimmung aller** (PRIVACY 10): kurze Reibung beim nächsten Start. Wenn möglich mit einer ohnehin anstehenden
   Änderung bündeln.
-- **Fehler im QR-Encoder:** ungültige Codes. Gegenmittel: Rundlauf mit `zxing` im Test, Gerätetest mit zwei Kameras.
+- **QR auf iOS:** `CIQRCodeGenerator` liefert ein Bild, kein Raster. Gegenmittel: Rundlauf-Test in der CI, Gerätetest.
 - **Code Scanner:** fehlt ohne Play-Dienste, lädt beim ersten Mal nach, ML-Kit-Telemetrie. Gegenmittel: Knopf
   ausblenden, Hinweis anzeigen, Systemkamera als Weg, Prüfung nach §3.3.
 - **Weitergeleitete Claim-Links:** falsche Person übernimmt. Gegenmittel: Vorschau, Push an den Anleger, Lösen, einmalige
   Nutzung, ein Link je Gast.
-- **Zusammenspiel mit 0.6.4** (Kontolöschung der übernehmenden Person): 0.6.4 behandelt beanspruchte Gäste schon wie
+- **Zusammenspiel mit 0.6.5** (Kontolöschung der übernehmenden Person): 0.6.5 behandelt beanspruchte Gäste wie
   zugeordnete. pgTAP 470 deckt das ab, 490 ergänzt einen Claim-Fall.
 - **Verlorener Link bei Prozessende während des Onboardings:** kein Datenverlust, die Person tippt den Link erneut an.
 
@@ -525,9 +527,9 @@ Später, eigene Releases: Install-Referrer (falls der Feldtest Hänger zeigt, E6
 
 | # | Frage | Empfehlung |
 |---|---|---|
-| E1 | Linkformat | `https://advantly.eu/i/#<token>`: Token im Fragment, ein Typ für Freund und Claim (§3.1). |
+| E1 | Linkformat | `https://advantly.eu/i/#<token>`: nur Token im Fragment, ein Typ für Freund und Claim (§3.1). |
 | E2 | Auftrag für `site/` (assetlinks, `/i/`, Datenschutz DE/EN) | **Ja, als eigener PR vor dem App-Release.** Ohne ihn gibt es keine App Links und keinen Weg ohne App. `pages.yml` bleibt unverändert. |
-| E3 | Neue Datenschutz-Fassung (PRIVACY 10, alle bestätigen neu) | **Ja**, weil Freundschaft ohne Anfrage und „Gast übernehmen“ in §4.3 fehlen. Wenn möglich mit einer anderen anstehenden Textänderung bündeln. |
+| E3 | Neue Datenschutz-Fassung (PRIVACY 10, alle bestätigen neu) | **Ja**, weil Freundschaft ohne Anfrage und „Gast übernehmen“ in §4.3 fehlen. Bündelung nur innerhalb desselben Releases (z. B. mit 0.6.5), siehe `plan-reste-0.6.x.md` §2.1. |
 | E4 | In-App-Scanner (Google Code Scanner) oder nur Systemkamera | **Code Scanner**, aber nur wenn die ML-Kit-Offenlegung keine neue Datenart in der Play-Datensicherheit erzwingt. Sonst nur Systemkamera. |
 | E5 | QR einmal oder mehrfach (z. B. 10 Personen in 10 min) nutzbar | **Einmal**: Das ist Serverstand und ohne Schemaänderung. Nach jedem Einlösen zeigt die App automatisch einen neuen Code. |
 | E6 | Install-Referrer (Link übersteht die Installation) | **Erst nicht.** Fallback-Seite „nach der Installation erneut antippen“ und Einfügen in der App. Nachrüsten, wenn der Feldtest Hänger zeigt. Dann prüfen, dass der Token so über Google Play läuft. |
@@ -537,4 +539,4 @@ Später, eigene Releases: Install-Referrer (falls der Feldtest Hänger zeigt, E6
 | E10 | Vorschau vor Kontoanlage (anonymer Endpunkt mit Alias) | **Nein.** Ohne Konto bleibt der Text generisch, Namen erst nach der Anmeldung. Kein anonymer RPC, kein zusätzliches Rate-Limit nötig. |
 | E11 | Inhalt der Claim-Vorschau | Alias des Anlegers, Gastname und Anzahl der Matches. Keine Mitspielernamen und keine Ergebnisse vor dem Annehmen. |
 | E12 | Aufbewahrung von Einladungen | **30 Tage** nach Ablauf bzw. Nutzung löschen (S7), so in die Datenschutzerklärung. |
-| E13 | Versionsnummer | 0.7.0 (Build 18) nach 0.6.4, weil es ein neues Feature mit neuer Datenschutz-Fassung ist. |
+| E13 | Versionsnummer | 0.7.0 (nächster freier Build) nach 0.6.4/0.6.5, weil es ein neues Feature mit neuer Datenschutz-Fassung ist. |

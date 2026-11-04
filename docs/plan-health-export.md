@@ -4,6 +4,8 @@
 > [05 §0/§2.3/§4/§6](05-watches-health.md), [P3 Tracker-Import](p3-tracker-import.md), [Plan Puls](plan-puls-highlights.md) §10,
 > [Play-Console-Checkliste](release/play-console.md) §6.6/§6.7, Datenschutzerklärung Fassung 9 (`site/app-datenschutz.html` §3.3/§3.4),
 > Nutzerentscheid 02.11.2026 „Gesundheitsdaten nur lokal“ · Quellen [Sn] am Ende, abgerufen am 04.11.2026
+> · Überarbeitet nach Review (Fable, Astra): „nur lokal“ als Nutzerentscheidung E14, Einwilligungsfassung, Exportrevision,
+> Löschen vor Widerruf
 
 ## 1. Ziel, Abgrenzung, Verhältnis zu „nur lokal“
 
@@ -19,7 +21,10 @@ die Tracker-Daten von dort. Eine Anbindung an Fitbit-Server gibt es nicht (§4.1
 - Health Connect und Apple Health sind **Speicher des Betriebssystems auf dem Gerät des Nutzers**. Schreiben und Lesen läuft
   per IPC auf dem Handy, nichts geht an uns oder in unsere Cloud.
 - Was dort liegt, verwaltet der Nutzer. Andere Apps lesen es nur mit seiner Freigabe in Health Connect bzw. Apple Health.
-  Das muss die Einwilligung ausdrücklich sagen (§5.4).
+- **„Nur lokal“ ist damit nicht automatisch erfüllt:** Health Connect kann seine Daten über das Google-Konto sichern
+  (Sicherung und Wiederherstellung), und Apps wie Google Health lesen mit Freigabe mit und übertragen in ihre Cloud.
+  Advantly selbst sendet nichts, aber der Export öffnet diesen Weg. Ob das mit dem Entscheid vom 02.11. vereinbar ist,
+  entscheidet der Nutzer (**E14, echte Voraussetzung für G3**). Die Einwilligung muss es ausdrücklich sagen (§5.5).
 - **Importierte Tracker-Daten bleiben auf dem Handy.** Sie gehen nicht in die Cloud, nicht in `matches.meta`, nicht an Mitspieler,
   nicht in `DiagnosticLog`, Feedback oder Push. Es gilt dieselbe Grenze wie für `health_series`.
 - Bei Gerätewechsel gehen importierte Zuordnungen verloren wie Pulsverläufe. Im neuen Health Connect liegen die Originale ggf. noch,
@@ -115,8 +120,15 @@ einer Wiederherstellung kein Duplikat derselben App.
   - Die 64-KiB-Grenze bei `MAX_BUCKETS = 5 040` im Codec-Test nachrechnen. Notfalls kcal im 30-s-Raster.
 - Wear: `WorkoutService.recordHealth` gibt `caloriesCounter.kcal` mit Zeitstempel an `MatchSession.recordCalories`.
 - watchOS: neue Facade-Funktion `WatchHealth.recordEnergy(matchId, atMs, cumulativeKcal: Long)` (nur primitive Typen, Regel 4).
-- Kalorien werden nur aufgezeichnet, wenn auch der Puls aufgezeichnet wird. Dieselbe Einwilligung („Pulsverlauf aufzeichnen“)
-  deckt sie ab, ihr Text nennt dann „Puls, Schritte und Kalorien“ (§5.4).
+- **Einwilligungsfassung (neu):** `HealthConsent` speichert heute nur `enabled`, `counter`, `origin`, keine Fassung.
+  Bestehende Einwilligungen („Puls und Schritte“) werden **nicht still erweitert**.
+  - `HealthConsent` bekommt `version: Int = 1` (additiv im Match-Kopf, Lamport-Merge unverändert, `version` reist mit).
+  - Fassung 2 = „Puls, Schritte und Kalorien“. Kalorien zeichnen Uhr und Handy nur auf, wenn `enabled` **und**
+    `version ≥ 2`.
+  - Bestehende Nutzer sehen beim nächsten Öffnen der Puls-Einstellung bzw. vor dem nächsten Match mit Uhr einen
+    ausdrücklichen Dialog „Auch Kalorien aufzeichnen?“. Ablehnen lässt Fassung 1 (Puls und Schritte) bestehen.
+  - **G1 wird erst aktiv, wenn G2 live ist** (Texte freigegeben, Datenschutzfassung im Katalog). Bis dahin bleibt die
+    Aufzeichnung hinter einem Schalter aus.
 
 ### 3.4 Duplikate vermeiden, Idempotenz
 
@@ -126,11 +138,17 @@ einer Wiederherstellung kein Duplikat derselben App.
   - `advantly:<matchId>:kcal`
   - `matchId` ist eine UUID und damit über Konten und Geräte eindeutig. Das ersetzt `racketone:<matchId>:<playerId>` aus 05 §2.3,
     weil nur der eigene Spieler schreibt.
-- **`clientRecordVersion`** = Export-Revision des Matches: `max(Match-Kopf-Revision, health_series.revision)`, monoton steigend.
-  Health Connect ignoriert ein erneutes Schreiben mit derselben `clientRecordId` oder aktualisiert den vorhandenen Record,
-  statt ein Duplikat anzulegen [S1].
+- **`clientRecordVersion`** = **eigene, persistierte Exportrevision** in `health_export.export_version`. Nicht
+  `max(Kopf-, Serienrevision)`: Das Maximum ist nicht monoton (eine Quelle kann sinken, z. B. nach Neuaufbau), und
+  Ergebnisänderungen erhöhen die PROJECTION-, nicht die HEADER-Revision (`CloudMetadata.sq`).
+  - Vor jedem Schreiben wird der Exportplan berechnet und gehasht (`plan_hash`). Weicht er vom zuletzt geschriebenen ab,
+    gilt `export_version + 1`, erst persistiert, dann geschrieben. Gleicher Hash → kein Schreibaufruf.
+  - Health Connect ersetzt einen Record mit derselben `clientRecordId` nur bei höherer Version, sonst ignoriert es ihn [S1].
+  - **Kürzere Serie:** `health_export.hr_chunks` merkt sich die Zahl geschriebener `hr:<n>`-Records. Werden es weniger,
+    löscht der Export die überzähligen per `clientRecordIdsList`; ebenso `kcal`, wenn keine Kalorien mehr vorliegen.
 - **Lokales Protokoll `health_export`** (`17.sqm`):
-  - Spalten `scope_id`, `match_id`, `written_version`, `state` (`WRITTEN`/`REMOVED`/`FAILED`), `written_at_ms`, `error`
+  - Spalten `scope_id`, `match_id`, `export_version`, `plan_hash`, `hr_chunks`, `state` (`PENDING`/`WRITTEN`/`REMOVED`/`FAILED`),
+    `written_at_ms`, `error`
   - Lösch-Trigger wie bei `health_series`
   - Es dient der Anzeige im Match (§6) und vermeidet unnötige Schreibaufrufe. Maßgeblich für Duplikate bleibt die `clientRecordId`.
 - **Keine Schleife:** Der Import (§4) filtert Records mit `dataOrigin = eu.advantly` heraus.
@@ -147,8 +165,8 @@ einer Wiederherstellung kein Duplikat derselben App.
   Schreiben ist auch im Hintergrund erlaubt, nur das **Lesen** braucht dafür eine eigene Berechtigung [S3].
 - **Nachträglich:** Im Match-Detail „In Health Connect eintragen“ für ältere Matches. Beim Einschalten werden **nicht** automatisch
   alle alten Matches nachgetragen. Es gilt „ab jetzt“, mit einem einmaligen Angebot „Auch die letzten N Matches eintragen?“ (E4).
-- **Korrekturen:** Ändert sich danach das Matchende, die Satzfolge (Undo am Ende), der Pulsverlauf (neue Revision) oder die Sportart,
-  steigt die Version und dieselben `clientRecordId`s werden überschrieben.
+- **Korrekturen:** Ändert sich danach das Matchende, die Satzfolge (Undo am Ende, Ergebnis-Korrektur), der Pulsverlauf oder die
+  Sportart, ändert sich der Plan-Hash, die Exportrevision steigt (§3.4), und dieselben `clientRecordId`s werden überschrieben.
 - **Lange Matches:** Bei mehr als 4 h Dauer vorher das tatsächliche Ende bestätigen lassen (p3-tracker-import „vergessenes Matchende“).
   Das Match wird dadurch nicht beendet.
 - **Löschen in Health Connect** über `deleteRecords(..., clientRecordIdsList = …)`, nur eigene Records:
@@ -171,10 +189,13 @@ einer Wiederherstellung kein Duplikat derselben App.
 - **Teilweise gewährt:** Fehlt `WRITE_EXERCISE`, bleibt der Export aus und die Einstellungen zeigen einen Hinweis. Fehlt ein optionales
   Recht, wird ohne diesen Typ geschrieben und das Match zeigt „ohne Puls“.
 - **Vor jedem Schreiben** die gewährten Rechte prüfen [S1].
-- **Widerruf in der App:**
-  - Schalter aus → `permissionController.revokeAllPermissions()` nur dann, wenn auch der Import aus ist. Sonst nur die Schreibrechte
-    nicht mehr nutzen.
-  - Danach die Rückfrage zum Löschen (§3.5).
+- **Widerruf in der App (Reihenfolge verbindlich):**
+  1. Schalter aus → Rückfrage zum Löschen (§3.5).
+  2. Gewünschte Löschungen in Health Connect **zuerst** ausführen, solange die Rechte noch bestehen.
+  3. **Danach** `permissionController.revokeAllPermissions()`, nur wenn auch der Import aus ist. Sonst die Schreibrechte nur
+     nicht mehr nutzen.
+  - Scheitert das Löschen (offline ist hier kein Thema, aber Health Connect nicht erreichbar), bleibt der Export aus, die Rechte
+    bleiben bis zum nächsten Versuch, und die Einstellungen zeigen „Entfernen ausstehend“.
 - **Widerruf in Health Connect** (Systemeinstellungen): Die App stellt das beim nächsten Vordergrund fest, schaltet den Export aus und
   zeigt einen Hinweis.
 
@@ -356,7 +377,7 @@ READ_EXERCISE, READ_HEART_RATE, READ_STEPS, READ_TOTAL_CALORIES_BURNED   (Import
 - **Technisch absichern:** Importierte und exportierte Werte nie in Supabase, Push, Feedback, `DiagnosticLog` oder Crash-Pfaden.
   Ein Test prüft `toString()` (Muster `HealthSeries(<redacted>)`).
 
-### 5.4 Datenschutzerklärung: neue Fassung 10
+### 5.4 Datenschutzerklärung: neue Fassung (Nummer nach `plan-reste-0.6.x.md` §2.1)
 
 **Jede inhaltliche Änderung = neue PRIVACY-Fassung im Zustimmungskatalog, alle Konten bestätigen neu.** Danach `is_current` prüfen
 (Memory „Datenschutz immer neu bestätigen“, `docs/support-admin-betrieb.md`). `site/` wird erst mit ausdrücklichem Auftrag geändert.
@@ -367,7 +388,8 @@ Hier steht nur der Inhalt.
 - **Neuer §3.5 „Health Connect und Apple Health (optional)“:**
   - **Eintragen:** was (Sportart, Start/Ende, Sätze, Ergebnis ohne Namen; Puls und Kalorien nur mit Pulsverlauf), wann, auf welchem
     Gerät. Andere Apps lesen es nur mit Freigabe in Health Connect. Google bzw. Apple verwalten diesen Speicher nach eigenen
-    Bestimmungen.
+    Bestimmungen; Health Connect kann ihn über das Google-Konto sichern, Apps wie Google Health können gelesene Daten in ihre
+    Cloud übertragen (E14).
   - **Lesen:** welche Typen (Trainings, Puls, Schritte, Kalorien), nur im Zeitraum eigener Matches, nur nach Bestätigung zugeordnet,
     nur auf dem Handy, keine Cloud, nicht geteilt.
   - **Löschen und Widerruf:** in der App; Originale in Health Connect bleiben bzw. werden nur auf Wunsch entfernt.
@@ -382,11 +404,12 @@ Hier steht nur der Inhalt.
 | Schlüssel | DE | EN |
 |---|---|---|
 | `hc_export_grant_title` | Matches in Health Connect eintragen? | Add matches to Health Connect? |
-| `hc_export_grant_text` | Ich willige ein, dass Advantly jedes Match, bei dem ich mitspiele, nach dem Ende als Training in Health Connect auf diesem Handy einträgt: Sportart, Start, Ende, Sätze und Ergebnis, und – wenn ein Pulsverlauf aufgezeichnet wurde – Puls und Kalorien meiner Uhr. Schritte trägt Advantly nicht ein. Apps, denen ich in Health Connect Zugriff gebe, können diese Daten lesen. Ich kann die Einwilligung jederzeit widerrufen, indem ich den Schalter ausschalte. Details: Datenschutzerklärung, Abschnitt 3.5. | I consent to Advantly adding every match I play in to Health Connect on this phone as a workout once it ends: sport, start, end, sets and result, and – if a heart rate history was recorded – heart rate and calories from my watch. Advantly does not add steps. Apps I give access in Health Connect can read this data. I can withdraw my consent at any time by switching this off. Details: privacy policy, section 3.5. |
+| `hc_export_grant_text` | Ich willige ein, dass Advantly jedes Match, bei dem ich mitspiele, nach dem Ende als Training in Health Connect auf diesem Handy einträgt: Sportart, Start, Ende, Sätze und Ergebnis, und – wenn ein Pulsverlauf aufgezeichnet wurde – Puls und Kalorien meiner Uhr. Schritte trägt Advantly nicht ein. Apps, denen ich in Health Connect Zugriff gebe, können diese Daten lesen und z. B. in ihre Cloud übertragen; Health Connect kann sie mit meinem Google-Konto sichern. Advantly selbst sendet nichts davon an seine Server. Ich kann die Einwilligung jederzeit widerrufen, indem ich den Schalter ausschalte. Details: Datenschutzerklärung, Abschnitt 3.5. | I consent to Advantly adding every match I play in to Health Connect on this phone as a workout once it ends: sport, start, end, sets and result, and – if a heart rate history was recorded – heart rate and calories from my watch. Advantly does not add steps. Apps I give access in Health Connect can read this data and may, for example, transfer it to their cloud; Health Connect may back it up to my Google account. Advantly itself sends none of it to its servers. I can withdraw my consent at any time by switching this off. Details: privacy policy, section 3.5. |
 | `hc_import_grant_title` | Daten von Fitness-Trackern lesen? | Read data from fitness trackers? |
 | `hc_import_grant_text` | Ich willige ein, dass Advantly in Health Connect auf diesem Handy Trainings, Puls, Schritte und Kalorien aus dem Zeitraum meiner Matches liest, zum Beispiel von einem Fitbit, und sie nach meiner Bestätigung meinem Match zuordnet. Die Daten bleiben auf diesem Handy, gehen nicht in die Cloud und werden nicht geteilt. Widerrufe ich, löscht Advantly die zugeordneten Tracker-Daten; die Originale in Health Connect bleiben unverändert. Details: Datenschutzerklärung, Abschnitt 3.5. | I consent to Advantly reading workouts, heart rate, steps and calories from the time of my matches in Health Connect on this phone, for example from a Fitbit, and assigning them to my match after I confirm. The data stays on this phone, never goes to the cloud and is not shared. If I withdraw, Advantly deletes the assigned tracker data; the originals in Health Connect stay unchanged. Details: privacy policy, section 3.5. |
 | `hc_grant_confirm` | Einwilligen und weiter | Consent and continue |
-| `health_grant_text` (vorhanden, anpassen) | … Puls, Schritte **und Kalorien** … | … heart rate, steps **and calories** … |
+| `health_grant_text` (vorhanden, wird Fassung 2) | … Puls, Schritte **und Kalorien** … | … heart rate, steps **and calories** … |
+| `health_grant_calories` (neu, für Bestandsnutzer) | Auch Kalorien aufzeichnen? Deine Uhr misst während des Matches die verbrauchten Kalorien. Advantly speichert sie wie den Puls nur auf Uhr und Handy. Ohne Zustimmung bleibt es bei Puls und Schritten. | Also record calories? Your watch measures the calories burned during the match. Like heart rate, Advantly stores them only on your watch and phone. Without consent it stays with heart rate and steps. |
 
 Die Texte sind ausdrücklich, freiwillig und nicht vorausgewählt (wie Fassung 9 §3.4). Danach folgt der Health-Connect-Systemdialog.
 
@@ -439,8 +462,10 @@ Die Texte sind ausdrücklich, freiwillig und nicht vorausgewählt (wie Fassung 9
 ### 7.2 Tests
 
 - **`shared/health` (`commonTest`):**
-  - Exportplan: Sportart → Typ, Laps je Satz, IDs und Version monoton
-  - Korrektur erhöht die Version
+  - Exportplan: Sportart → Typ, Laps je Satz, IDs, Plan-Hash
+  - Exportrevision streng monoton; Ergebnis-Korrektur (nur PROJECTION) und neue Serie erhöhen sie, gleicher Plan nicht
+  - kürzere Serie → überzählige `hr:<n>` werden gelöscht, `kcal` fehlt → gelöscht
+  - Einwilligung Fassung 1 → keine Kalorien, Fassung 2 → Kalorien; Merge behält `version`
   - ohne Serie nur die Session
   - Director und fremde Matches → nichts
   - kcal-Reihe nie fallend, ganzzahlig, Lücken bleiben `null`
@@ -460,7 +485,7 @@ Die Texte sind ausdrücklich, freiwillig und nicht vorausgewählt (wie Fassung 9
 - **`androidApp` (JUnit 4) mit `FakeHealthConnectClient`:**
   - Schreiben/Überschreiben/Löschen per `clientRecordId`
   - Teilrechte
-  - Widerruf
+  - Widerruf: Löschen läuft vor `revokeAllPermissions`, Fehler beim Löschen → kein Widerruf
   - Überschneidung → `FAILED`
   - Lesen mit `dataOriginFilter`
   - Nachlieferung (geänderte `lastModifiedTime`) → neue Revision, keine zweite Serie
@@ -479,8 +504,8 @@ Die Texte sind ausdrücklich, freiwillig und nicht vorausgewählt (wie Fassung 9
 | PR | Inhalt | Module | Aufwand | Abnahme |
 |---|---|---|---|---|
 | **G0** | Spike: Health Connect schreiben/lesen auf dem Pixel 6. Liefert Google Health (Pixel Watch, Fitbit Air) Puls/Exercise/Kalorien, und in welcher Auflösung und mit welchem Verzug? Entsteht eine Fitbit-Auto-Session bei unserem Wear-Workout? Sample-Limit `HeartRateRecord`, PAUSE-Segment. Ergebnis als Notiz in `docs/spikes/` | – | 1–2 PT | belegte Antworten, Modellmatrix angelegt |
-| **G1** | Kalorien aufzeichnen: `HealthSeries.kcal`, `17.sqm` (`kcal_csv`), Protokollfeld, Wear-Recorder, kcal-Kachel im Match | health, data, sync-protocol, match-session, wearApp, presentation, ui-phone | 2–3 PT | Tests aus 7.2; Realtest Pixel Watch: kcal stimmen mit der Live-Anzeige überein |
-| **G2** | Recht und Store: Datenschutz Fassung 10 DE/EN, DSFA-Ergänzung, Health-Apps-Erklärung, Data Safety, Einwilligungstexte | `site/` (nur mit Auftrag), docs/release | 1 PT + Nutzer | Nutzerfreigabe der Texte; Fassung im Katalog |
+| **G1** | Kalorien aufzeichnen: `HealthSeries.kcal`, `17.sqm` (`kcal_csv`), Protokollfeld, `HealthConsent.version`, Neu-Einwilligung, Wear-Recorder, kcal-Kachel im Match | core-model, health, data, sync-protocol, match-session, wearApp, presentation, ui-phone | 3–4 PT | Tests aus 7.2; Realtest Pixel Watch: kcal stimmen mit der Live-Anzeige überein. **Aktiv erst nach G2** |
+| **G2** | Recht und Store: neue Datenschutzfassung DE/EN, DSFA-Ergänzung, Health-Apps-Erklärung, Data Safety, Einwilligungstexte | `site/` (nur mit Auftrag), docs/release | 1 PT + Nutzer | Nutzerfreigabe der Texte; Fassung im Katalog |
 | **G3** | Export Android: Abhängigkeit, Manifest, Begründungs-Activity, `HealthStorePort` + `HealthConnectStore`, `WorkoutExportPlan`, `health_export`, Einstellungen, Match-Zeile, Löschen | health, data, presentation, ui-phone, androidApp | 4–5 PT | Tests 7.2; Realtest: Eintrag sichtbar, Korrektur ohne Duplikat, Löschen. **Vorbedingung G2 live** |
 | **G4** | Import Android (Fitbit zuerst): Lesen im Fenster, `TrackerMatcher`, `health_import_source`, Import-Karte, Quellen in Kacheln/Zeitleiste, Nachlieferung, Lösen | health, data, presentation, ui-phone, androidApp | 5–7 PT | Abnahme nach p3-tracker-import für den Android-Pfad mit Fitbit Air |
 | **G5** | Modellmatrix Fitbit 2021–2026 über Health Connect (Tester/Leihgeräte) | docs | laufend | je Modell „nachgewiesen“ oder „eingeschränkt“ mit Beleg |
@@ -489,9 +514,10 @@ Die Texte sind ausdrücklich, freiwillig und nicht vorausgewählt (wie Fassung 9
 
 Reihenfolge:
 - G0 zuerst.
-- G1 und G2 laufen parallel.
+- G1 und G2 werden parallel gebaut; G1 wird **nicht vor G2** aktiviert (§3.3).
 - G3 braucht G1 und G2.
 - G4 braucht G3 (Port, Rechte-Flow) und G2.
+- G3 und G4 brauchen die Nutzerentscheidung E14.
 - G6 ist unabhängig, aber erst mit Apple-Account testbar.
 
 Gesamt Android (G0–G4): **etwa 13–18 PT** plus Store-Prüfzeit.
@@ -535,6 +561,11 @@ Gesamt Android (G0–G4): **etwa 13–18 PT** plus Store-Prüfzeit.
   **Empfehlung: ja.** Manuell bleibt die Zuordnung über „Weitere Quellen“ möglich.
 - **E12 – Apple:** Die Uhr speichert, das iPhone nie. Umsetzung erst mit Apple-Account (G6 nur Code + CI). **Empfehlung: ja.**
 - **E13 – Freigabe:** Kostenlos wie die Pulsaufzeichnung (Plan Puls E6)? **Empfehlung: ja.**
+- **E14 – „Nur lokal“ und Health Connect** (Nutzerentscheidung, Voraussetzung für G3/G4): Ist der Export vereinbar mit dem
+  Entscheid vom 02.11., obwohl Health Connect über das Google-Konto sichern kann und Apps wie Google Health mitlesen?
+  **Empfehlung: ja**, als vom Nutzer gesteuerter OS-Speicher mit ausdrücklichem Hinweis in Einwilligung und
+  Datenschutzerklärung. Advantly sendet weiter nichts. Bei „nein“ entfallen G3 und G4; G1 bleibt sinnvoll.
+- **E15 – Kalorien nur mit neuer Einwilligung** (Fassung 2, kein stilles Erweitern)? **Empfehlung: ja** (§3.3).
 
 ## Quellen (abgerufen am 04.11.2026)
 
