@@ -423,7 +423,11 @@ private fun Comparison(
             stats.longestStreak.map { _, v -> v.toString() },
         )
     Column(Modifier.testTag("result_compare"), verticalArrangement = Arrangement.spacedBy(Spacing.m)) {
-        rows.forEach { CompareBar(it) }
+        // „Wir“ links auch dann, wenn ich im Match eines anderen Kontos in B stehe
+        val mirrored = record.summary.setup.ownSide == Side.B
+        rows.forEach {
+            CompareBar(if (mirrored) CompareRow(it.label, SidePair(it.values.b, it.values.a), SidePair(it.texts.b, it.texts.a)) else it)
+        }
     }
 }
 

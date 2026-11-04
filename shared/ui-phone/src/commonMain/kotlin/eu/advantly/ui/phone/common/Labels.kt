@@ -123,7 +123,7 @@ fun playerName(
         (setup.lineup.a + setup.lineup.b)
             .firstOrNull { playerId ->
                 playerId == LocalSelfId.current || playerId in LocalSelfAliases.current
-            }?.let(setup.lineup::sideOf) ?: Side.A
+            }?.let(setup.lineup::sideOf) ?: setup.ownSide
     return stringResource(
         when {
             side == ownerSide -> Res.string.player_partner

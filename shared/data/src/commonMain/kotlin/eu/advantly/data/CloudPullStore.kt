@@ -182,23 +182,39 @@ class CloudPullStore internal constructor(
     fun assignedParticipants(
         profileId: String,
         matchId: String,
-    ): Map<String, String> {
-        val json = snapshot(profileId, CloudPullEntityKind.MATCH, matchId)?.json ?: return emptyMap()
-        val participants =
-            runCatching { (DataJson.parseToJsonElement(json) as? JsonObject)?.get("participants") as? JsonArray }.getOrNull()
-                ?: return emptyMap()
-        return participants
-            .mapNotNull { element ->
-                val participant = element as? JsonObject ?: return@mapNotNull null
-
-                fun text(name: String) = (participant[name] as? JsonPrimitive)?.takeIf { it.isString }?.content
-                val linked = text("linkStatus") in setOf("assigned", "confirmed")
+    ): Map<String, String> =
+        participants(profileId, matchId)
+            .mapNotNull { participant ->
+                val linked = participant.text("linkStatus") in setOf("assigned", "confirmed")
                 val deleted = (participant["deletedProfile"] as? JsonPrimitive)?.booleanOrNull == true
-                val player = text("playerId")
-                val profile = text("profileId")
+                val player = participant.text("playerId")
+                val profile = participant.text("profileId")
                 if (linked && !deleted && player != null && profile != null) player to profile else null
             }.toMap()
+
+    /**
+     * Plätze (Lineup-IDs) des gezogenen Matches [matchId], die der Server mit dem eigenen Konto [profileId] verknüpft hat
+     * (Ersteller, Freund oder zugeordneter Gast). Daraus folgt die eigene Seite in Matches anderer Konten (plan-pro §2.3).
+     */
+    fun ownSlots(
+        profileId: String,
+        matchId: String,
+    ): Set<String> =
+        participants(profileId, matchId)
+            .filter { it.text("profileId") == profileId }
+            .mapNotNullTo(mutableSetOf()) { it.text("slotId") }
+
+    private fun participants(
+        profileId: String,
+        matchId: String,
+    ): List<JsonObject> {
+        val json = snapshot(profileId, CloudPullEntityKind.MATCH, matchId)?.json ?: return emptyList()
+        val participants =
+            runCatching { (DataJson.parseToJsonElement(json) as? JsonObject)?.get("participants") as? JsonArray }.getOrNull()
+        return participants.orEmpty().filterIsInstance<JsonObject>()
     }
+
+    private fun JsonObject.text(name: String) = (this[name] as? JsonPrimitive)?.takeIf { it.isString }?.content
 
     /** false: Epoche wechselte hinter Cursor null; Antwort verwerfen und dauerhaft ab null neu beginnen. */
     fun commitMetadata(

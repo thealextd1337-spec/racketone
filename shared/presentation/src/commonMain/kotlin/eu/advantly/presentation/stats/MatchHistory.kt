@@ -20,22 +20,23 @@ fun MatchSummary.outcome(): HistoryOutcome =
     when {
         !isRated -> HistoryOutcome.ABANDONED
         result.winner == null -> HistoryOutcome.DRAW
-        result.winner == Side.A -> HistoryOutcome.WIN
+        result.winner == setup.ownSide -> HistoryOutcome.WIN
         else -> HistoryOutcome.LOSS
     }
 
 /**
- * Gewonnene Games der eigenen Seite A (Gesamtstatistik am Start). Tennis/Padel: Spiele über alle regulären Sätze,
- * einschließlich des bei vorzeitigem Ende eingefrorenen Satzes; ein Match-Tiebreak ist kein Spiel. Pickleball,
- * Badminton und Tischtennis: Dort heißen die Sätze „Games“, es zählen die gewonnenen Sätze.
+ * Gewonnene Games der eigenen Seite ([MatchSetup.ownSide], Gesamtstatistik am Start). Tennis/Padel: Spiele über alle
+ * regulären Sätze, einschließlich des bei vorzeitigem Ende eingefrorenen Satzes; ein Match-Tiebreak ist kein Spiel.
+ * Pickleball, Badminton und Tischtennis: Dort heißen die Sätze „Games“, es zählen die gewonnenen Sätze.
  */
 val MatchSummary.gamesWon: Int
     get() =
         if (setup.sport.isTennisLike) {
-            val current = interruptedSet?.takeIf { it.setKind == SetKind.REGULAR }?.games?.a ?: 0
-            sets.filter { it.kind == SetKind.REGULAR }.sumOf { it.games?.a ?: 0 } + current
+            val own = setup.ownSide
+            val current = interruptedSet?.takeIf { it.setKind == SetKind.REGULAR }?.games?.get(own) ?: 0
+            sets.filter { it.kind == SetKind.REGULAR }.sumOf { it.games?.get(own) ?: 0 } + current
         } else {
-            sets.count { it.winner == Side.A }
+            sets.count { it.winner == setup.ownSide }
         }
 
 data class HistoryPerson(
@@ -51,8 +52,8 @@ fun historyPeople(
     Side.entries.flatMap { side ->
         setup.lineup.players(side).mapNotNull { slot ->
             val player = setup.assignedPlayers[slot] ?: setup.player(slot) ?: return@mapNotNull null
-            if (player.isPlaceholder || player.id in selfIds || slot in selfIds) return@mapNotNull null
-            HistoryPerson(player, if (side == Side.A) HistoryRole.PARTNER else HistoryRole.OPPONENT)
+            if (player.isPlaceholder || player.id in selfIds || slot in selfIds || slot in setup.ownSlots) return@mapNotNull null
+            HistoryPerson(player, if (side == setup.ownSide) HistoryRole.PARTNER else HistoryRole.OPPONENT)
         }
     }
 
