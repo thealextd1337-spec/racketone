@@ -25,9 +25,10 @@ const val SERVER_DELETED_NAME = "Gelöschter Spieler"
 private const val UNNAMED = "?"
 
 /**
- * [team] `A`/`B`, [position] 1..2. Redigiert ([deleted] oder der Server-Snapshot-Name, wo das Flag fehlt, z. B. in
- * `visitor_view`) → [CloudPlayerName.Deleted]; `?`, leer oder `null` an einem nicht verknüpften Platz → „Spieler N“.
- * Ein echter Gastname „?“ wird bewusst mit umgedeutet.
+ * [team] `A`/`B`, [position] 1..2. Redigiert → [CloudPlayerName.Deleted]: maßgeblich ist [deleted] (`deletedProfile` des
+ * Servers); nur wo es fehlt (`null`, `visitor_view` vor 20261104000300) entscheidet als Legacy-Fallback der
+ * Server-Snapshot-Name. `?`, leer oder `null` an einem nicht verknüpften Platz → „Spieler N“. Ein echter Gastname „?“ wird
+ * bewusst mit umgedeutet.
  */
 fun cloudPlayerName(
     name: String?,
@@ -35,11 +36,11 @@ fun cloudPlayerName(
     position: Int,
     doubles: Boolean,
     linked: Boolean = false,
-    deleted: Boolean = false,
+    deleted: Boolean? = null,
 ): CloudPlayerName {
     val trimmed = name?.trim().orEmpty()
     return when {
-        deleted || trimmed == SERVER_DELETED_NAME -> CloudPlayerName.Deleted
+        deleted ?: (trimmed == SERVER_DELETED_NAME) -> CloudPlayerName.Deleted
         !linked && (trimmed.isEmpty() || trimmed == UNNAMED) -> CloudPlayerName.Slot(slotNumber(team, position, doubles))
         else -> CloudPlayerName.Named(trimmed)
     }

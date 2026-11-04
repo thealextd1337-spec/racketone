@@ -49,6 +49,9 @@ class PlayerRepository internal constructor(
     private val redacted: (String) -> Boolean = { false },
     private val writable: (String) -> Boolean = { true },
 ) {
+    /** Vom Server redigiert (Redaktionsmanifest, z. B. verknüpfter Freund gelöscht): ausdrücklicher Status, nie der Name. */
+    fun isRedacted(id: PlayerId): Boolean = redacted(id.value)
+
     /** Der Self-Player oder `null`, wenn noch keiner angelegt ist. */
     fun self(): LocalPlayer? = queries.selectReadableSelf().executeAsOneOrNull()?.toLocal()
 

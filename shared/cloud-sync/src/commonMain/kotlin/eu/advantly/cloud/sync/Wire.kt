@@ -293,4 +293,6 @@ data class VisitorTeamMember(
     val team: String,
     val position: Int,
     val name: String,
+    /** Redigierter Platz (`match_participants.deleted_profile`), seit 20261104000300; ältere Server liefern es nicht. */
+    val deletedProfile: Boolean? = null,
 )

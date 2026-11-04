@@ -55,7 +55,7 @@ select is(current_setting('tests.m1')::jsonb -> 'projection',
 select ok(strpos(current_setting('tests.m1'), 'heartRate') = 0 and strpos(current_setting('tests.m1'), 'steps') = 0
           and strpos(current_setting('tests.m1'), 'telemetry') = 0, 'keine Telemetrie, auch nicht verschachtelt');
 select is(current_setting('tests.m1')::jsonb -> 'participants',
-          '[{"team":"A","position":1,"name":"Alice"},{"team":"B","position":1,"name":"Bob"}]'::jsonb,
+          '[{"team":"A","position":1,"name":"Alice","deletedProfile":false},{"team":"B","position":1,"name":"Bob","deletedProfile":false}]'::jsonb,
           'Teilnehmer mit Anzeigename, Team und Position');
 select is(current_setting('tests.m1')::jsonb -> 'scorerConnected', 'true'::jsonb, 'scorerConnected aus dem Live-Stand');
 select is((select e -> 'scorerConnected' from jsonb_array_elements(public.cloud_my_live_matches_v1()) e

@@ -1,8 +1,11 @@
 package eu.advantly.presentation.friends
 
 import eu.advantly.cloud.sync.PulledMatch
+import eu.advantly.cloud.sync.pulledPlayer
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.data.LocalData
+import eu.advantly.data.PlayerKind
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -34,6 +37,21 @@ data class GuestLink(
     val friendId: String? = null,
     val redacted: Boolean = false,
 )
+
+/**
+ * Eigene Gäste, die der Server kennt (Gast-ID → [GuestLink]). Redigiert heißt: im Pull gelöscht oder laut
+ * Redaktionsmanifest gesperrt (Freund gelöscht); nie über den Namen, ein Gast darf „Gelöschter Spieler“ heißen.
+ */
+fun LocalData.ownGuestLinks(profileId: String): Map<String, GuestLink> =
+    players
+        .all()
+        .filter { it.kind == PlayerKind.GUEST }
+        .mapNotNull { guest ->
+            cloudPulls.pulledPlayer(profileId, guest.id.value)?.takeIf { it.owned }?.let {
+                val redacted = it.deleted || players.isRedacted(guest.id)
+                guest.id.value to GuestLink(it.profileId.takeUnless { redacted }, redacted)
+            }
+        }.toMap()
 
 /** Hinweis nach „Mit Freund verknüpfen“: [matches] zugeordnete Matches. */
 data class GuestLinked(
@@ -74,7 +92,8 @@ data class CloudSlot(
     val team: String,
     val position: Int,
     val linked: Boolean = false,
-    val deleted: Boolean = false,
+    /** `deletedProfile` des Servers; `null`: nicht geliefert (ältere Server), dann entscheidet der Name. */
+    val deleted: Boolean? = null,
 )
 
 /** Eigene Sicht auf ein Match im Detail; ohne Konto, vor dem Hochladen oder ohne eigenen Platz ohne Aktionen. */

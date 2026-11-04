@@ -31,11 +31,9 @@ import eu.advantly.cloud.sync.SupabaseSupport
 import eu.advantly.cloud.sync.pulledFeed
 import eu.advantly.cloud.sync.pulledFriendships
 import eu.advantly.cloud.sync.pulledMatch
-import eu.advantly.cloud.sync.pulledPlayer
 import eu.advantly.core.model.MatchId
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.data.LocalData
-import eu.advantly.data.PlayerKind
 import eu.advantly.data.scoreEvents
 import eu.advantly.device.link.LiveViewsProvider
 import eu.advantly.match.session.AndroidMatchSessions
@@ -45,12 +43,11 @@ import eu.advantly.presentation.auth.GoogleCredential
 import eu.advantly.presentation.auth.PhonePullPort
 import eu.advantly.presentation.auth.PhoneUploadPort
 import eu.advantly.presentation.friends.FriendsViewModel
-import eu.advantly.presentation.friends.GuestLink
 import eu.advantly.presentation.friends.ScorerHandovers
 import eu.advantly.presentation.friends.SharedMatchesLocal
 import eu.advantly.presentation.friends.VisitorQueue
+import eu.advantly.presentation.friends.ownGuestLinks
 import eu.advantly.presentation.match.CloudPlayerName
-import eu.advantly.presentation.match.SERVER_DELETED_NAME
 import eu.advantly.presentation.push.PushRegistration
 import eu.advantly.presentation.support.SupportViewModel
 import eu.advantly.sync.protocol.LiveView
@@ -340,19 +337,8 @@ internal class PhoneAccountCore private constructor(
                 matchId: String,
             ) = guarded(emptyMap()) { cloudUploads.linkNotes(profileId, matchId) }
 
-            // Nur eigene Gäste, die der Server kennt; redigiert (Freund gelöscht) heißt dort „Gelöschter Spieler“.
-            override fun guestLinks(profileId: String) =
-                guarded(emptyMap()) {
-                    players
-                        .all()
-                        .filter { it.kind == PlayerKind.GUEST }
-                        .mapNotNull { guest ->
-                            cloudPulls.pulledPlayer(profileId, guest.id.value)?.takeIf { it.owned }?.let {
-                                val redacted = it.deleted || it.displayName == SERVER_DELETED_NAME
-                                guest.id.value to GuestLink(it.profileId.takeUnless { redacted }, redacted)
-                            }
-                        }.toMap()
-                }
+            // Nur eigene Gäste, die der Server kennt; redigiert nach ausdrücklichem Status, nicht nach dem Namen.
+            override fun guestLinks(profileId: String) = guarded(emptyMap()) { ownGuestLinks(profileId) }
         }
 
     private fun <T> guarded(

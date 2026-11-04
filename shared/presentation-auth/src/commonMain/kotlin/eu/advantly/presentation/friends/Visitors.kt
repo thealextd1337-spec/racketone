@@ -234,7 +234,15 @@ data class WatchedMatch(
 )
 
 internal fun VisitorView.toWatched(): WatchedMatch {
-    fun team(name: String) = teams.filter { it.team == name }.sortedBy { it.position }.map { CloudSlot(it.name, it.team, it.position) }
+    fun team(name: String) =
+        teams.filter { it.team == name }.sortedBy { it.position }.map {
+            CloudSlot(
+                it.name,
+                it.team,
+                it.position,
+                deleted = it.deletedProfile,
+            )
+        }
     val finished = status == "finished"
     val source = if (finished) result ?: live else live ?: result
 

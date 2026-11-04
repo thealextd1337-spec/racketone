@@ -26,7 +26,17 @@ class CloudPlayerNamesTest {
         assertEquals(CloudPlayerName.Named("?"), cloudPlayerName("?", "A", 2, doubles = true, linked = true))
         assertEquals(CloudPlayerName.Deleted, cloudPlayerName("?", "A", 1, doubles = false, deleted = true))
         assertEquals(CloudPlayerName.Deleted, cloudPlayerName("Anja", "B", 1, doubles = false, linked = true, deleted = true))
-        // visitor_view kennt kein Flag: der Server-Snapshot-Name genügt.
+        // Ältere Server (visitor_view ohne Flag): der Server-Snapshot-Name genügt als Legacy-Fallback.
         assertEquals(CloudPlayerName.Deleted, cloudPlayerName(SERVER_DELETED_NAME, "B", 2, doubles = true))
+    }
+
+    /** Review 0.6.3: Mit Flag entscheidet nur das Flag, ein Gast namens „Gelöschter Spieler“ bleibt ein Name. */
+    @Test
+    fun theFlagIsAuthoritativeWhenPresent() {
+        assertEquals(
+            CloudPlayerName.Named(SERVER_DELETED_NAME),
+            cloudPlayerName(SERVER_DELETED_NAME, "B", 2, doubles = true, deleted = false),
+        )
+        assertEquals(CloudPlayerName.Deleted, cloudPlayerName("Anja", "A", 1, doubles = false, deleted = true))
     }
 }
