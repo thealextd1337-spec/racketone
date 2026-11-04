@@ -707,6 +707,9 @@
     <string name="whats_new_13_2">Bitte bestätige die aktualisierte Datenschutzerklärung (Version 9), wenn du gefragt wirst – bis dahin werden deine Matches nicht gesichert.</string>
     <string name="whats_new_15_1">Klareres Uhr-Symbol: Grün heißt jetzt einfach „alles passt“ – Handy und Uhr sind verbunden und haben dieselbe Version.</string>
     <string name="whats_new_15_2">Zählt deine Uhr ein Match mit Freunden, zeigt dein Handy „Live-Stand wird übertragen“ – erlaube Advantly dafür Benachrichtigungen.</string>
+    <string name="whats_new_16_1">Gast mit Freund verknüpfen: Im Profil unter Spieler „Mit Freund verknüpfen“ wählen – alle Matches mit diesem Gast gehen an deinen Freund, er kann widersprechen.</string>
+    <string name="whats_new_16_2">Beim nachträglichen Zuweisen von Spielern stehen jetzt auch deine Freunde und du selbst zur Wahl.</string>
+    <string name="whats_new_16_3">Plätze ohne Namen heißen in Live und bei Zuschauern jetzt „Spieler 1“, „Spieler 2“ …, und der Upload ist robuster.</string>
     <string name="device_repair">Uhren neu koppeln</string>
     <string name="device_repair_hint">Nutze das, wenn eine Uhr verloren ging oder ersetzt wurde. Jede Uhr muss die Kopplung danach auf der Uhr selbst neu bestätigen; ihre Daten bleiben.</string>
     <string name="device_repair_confirm_title">Alle Uhren neu koppeln?</string>

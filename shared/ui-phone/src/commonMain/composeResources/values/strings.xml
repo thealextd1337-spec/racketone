@@ -707,6 +707,9 @@
     <string name="whats_new_13_2">Please confirm the updated privacy policy (version 9) when asked – until then your matches are not backed up.</string>
     <string name="whats_new_15_1">Clearer watch icon: green now simply means everything fits – phone and watch are connected and run the same version.</string>
     <string name="whats_new_15_2">While your watch scores a match with friends, your phone shows “Sharing live score” – allow notifications for Advantly to see it.</string>
+    <string name="whats_new_16_1">Link a guest to a friend: in your profile under players, choose “Link with friend” – all matches with that guest go to your friend, who can object.</string>
+    <string name="whats_new_16_2">Assigning players afterwards now also offers your friends and yourself.</string>
+    <string name="whats_new_16_3">Unnamed places now show as “Player 1”, “Player 2” … in Live and for spectators, and uploads are more robust.</string>
     <string name="device_repair">Re-pair watches</string>
     <string name="device_repair_hint">Use this if a watch was lost or replaced. Every watch then has to confirm pairing again on the watch itself; its data stays.</string>
     <string name="device_repair_confirm_title">Re-pair all watches?</string>

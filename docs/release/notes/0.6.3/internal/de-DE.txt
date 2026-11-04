@@ -1,0 +1,5 @@
+Neu in 0.6.3:
+• Gast mit Freund verknüpfen (Profil → Spieler): alle Matches gehen an den Freund, er kann widersprechen.
+• Nachträglich zuweisen: auch Freunde und du selbst.
+• „Spieler 1/2…“ statt „?“; Upload robuster bei abgelehnten Matches.
+Bitte testen: Gast „Test1“ mit Anja verknüpfen, Anja sieht die Matches.

@@ -1,0 +1,5 @@
+New in 0.6.3:
+• Link a guest to a friend (Profile → Players): all matches go to the friend, who can object.
+• Assign afterwards: friends and yourself too.
+• “Player 1/2…” instead of “?”; more robust uploads for rejected matches.
+Please test: link guest “Test1” to Anja, Anja sees the matches.
