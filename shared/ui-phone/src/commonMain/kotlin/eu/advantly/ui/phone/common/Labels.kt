@@ -65,6 +65,9 @@ import org.jetbrains.compose.resources.stringResource
 val LocalSelfId = staticCompositionLocalOf<PlayerId?> { null }
 val LocalSelfAliases = staticCompositionLocalOf<Set<PlayerId>> { emptySet() }
 
+/** Mit einem Freund verknüpfte eigene Gäste (plan-0.6.3 §3.5): Gast-ID → Alias des Freundes, nur zur Anzeige. */
+val LocalGuestAliases = staticCompositionLocalOf<Map<PlayerId, String>> { emptyMap() }
+
 /** Archivierte Personen nur aus Auswahlen ausblenden, nie aus historischen Matchdaten. */
 internal val LocalArchivedPlayerIds = staticCompositionLocalOf<Set<PlayerId>> { emptySet() }
 
@@ -95,6 +98,7 @@ fun sportColor(sport: Sport): Color {
 @Composable
 fun playerName(player: Player?): String {
     if (player == null) return ""
+    LocalGuestAliases.current[player.id]?.let { return it }
     if (player.displayName.isBlank() && player.id == LocalSelfId.current) return stringResource(Res.string.player_you)
     return player.displayName.ifBlank { stringResource(Res.string.player_you) }
 }

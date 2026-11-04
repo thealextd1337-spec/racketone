@@ -24,9 +24,12 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import eu.advantly.core.model.Side
+import eu.advantly.presentation.friends.CloudSlot
 import eu.advantly.presentation.friends.FeedMatch
 import eu.advantly.presentation.friends.FriendsAccess
 import eu.advantly.presentation.friends.FriendsViewModel
+import eu.advantly.presentation.match.CloudPlayerName
+import eu.advantly.presentation.match.cloudPlayerName
 import eu.advantly.ui.phone.common.SectionTitle
 import eu.advantly.ui.phone.common.ToggleRow
 import eu.advantly.ui.phone.common.sportName
@@ -50,6 +53,9 @@ import eu.advantly.ui.phone.resources.friends_feed_vs
 import eu.advantly.ui.phone.resources.friends_feed_winner
 import eu.advantly.ui.phone.resources.friends_unknown
 import eu.advantly.ui.phone.resources.history_corrected
+import eu.advantly.ui.phone.resources.player_deleted
+import eu.advantly.ui.phone.resources.player_slot_n
+import eu.advantly.ui.phone.resources.sharing_assigned
 import eu.advantly.ui.phone.resources.sharing_default_hint
 import eu.advantly.ui.phone.resources.sharing_default_loading
 import eu.advantly.ui.phone.resources.sharing_default_retry
@@ -61,6 +67,7 @@ import eu.advantly.ui.phone.resources.sharing_note_duplicate
 import eu.advantly.ui.phone.resources.sharing_note_not_friend
 import eu.advantly.ui.phone.resources.sharing_note_rejected
 import eu.advantly.ui.phone.resources.sharing_reject
+import eu.advantly.ui.phone.resources.sharing_reject_assignment_text
 import eu.advantly.ui.phone.resources.sharing_reject_text
 import eu.advantly.ui.phone.resources.sharing_share
 import eu.advantly.ui.phone.resources.sharing_share_hint
@@ -93,7 +100,7 @@ internal fun FeedList(
         ) {
             Text(headline(match), style = MaterialTheme.typography.bodyLarge, color = AdvantlyTheme.colors.text)
             Text(
-                stringResource(Res.string.friends_feed_vs, names(match.teamA), names(match.teamB)),
+                stringResource(Res.string.friends_feed_vs, names(match, Side.A), names(match, Side.B)),
                 color = AdvantlyTheme.colors.text2,
             )
         }
@@ -116,11 +123,17 @@ internal fun FeedDetail(
         )
         Text(headline(match), color = AdvantlyTheme.colors.text)
         Text(stringResource(Res.string.friends_feed_detail_hint), color = AdvantlyTheme.colors.text2)
-        Text("${stringResource(Res.string.friends_feed_side_a)}: ${names(match.teamA)}", modifier = Modifier.testTag("friends_feed_team_a"))
-        Text("${stringResource(Res.string.friends_feed_side_b)}: ${names(match.teamB)}", modifier = Modifier.testTag("friends_feed_team_b"))
+        Text(
+            "${stringResource(Res.string.friends_feed_side_a)}: ${names(match, Side.A)}",
+            modifier = Modifier.testTag("friends_feed_team_a"),
+        )
+        Text(
+            "${stringResource(Res.string.friends_feed_side_b)}: ${names(match, Side.B)}",
+            modifier = Modifier.testTag("friends_feed_team_b"),
+        )
         match.winner?.let { side ->
             Text(
-                stringResource(Res.string.friends_feed_winner, names(if (side == Side.A) match.teamA else match.teamB)),
+                stringResource(Res.string.friends_feed_winner, names(match, side)),
                 modifier = Modifier.testTag("friends_feed_winner"),
             )
         }
@@ -147,11 +160,22 @@ internal fun headline(match: FeedMatch): String {
     ).joinToString(" · ")
 }
 
+/** Namen einer Seite; unbenannte Plätze als „Spieler N“, redigierte als „Gelöschter Spieler“ (plan-0.6.3 §3.1/§3.6). */
 @Composable
-internal fun names(team: List<String>): String {
-    val unknown = stringResource(Res.string.friends_unknown)
-    return team.joinToString(" / ") { it.ifBlank { unknown } }
-}
+internal fun names(
+    match: FeedMatch,
+    side: Side,
+): String = (if (side == Side.A) match.teamA else match.teamB).map { label(it.toName(match.doubles)) }.joinToString(" / ")
+
+fun CloudSlot.toName(doubles: Boolean): CloudPlayerName = cloudPlayerName(name, team, position, doubles, linked, deleted)
+
+@Composable
+internal fun label(name: CloudPlayerName): String =
+    when (name) {
+        CloudPlayerName.Deleted -> stringResource(Res.string.player_deleted)
+        is CloudPlayerName.Slot -> stringResource(Res.string.player_slot_n, name.number)
+        is CloudPlayerName.Named -> name.name.ifBlank { stringResource(Res.string.friends_unknown) }
+    }
 
 private enum class SharingConfirm(
     val action: StringResource,
@@ -159,6 +183,7 @@ private enum class SharingConfirm(
 ) {
     REJECT(Res.string.sharing_reject, Res.string.sharing_reject_text),
     HIDE(Res.string.sharing_hide, Res.string.sharing_hide_text),
+    REJECT_ASSIGNMENT(Res.string.sharing_reject, Res.string.sharing_reject_assignment_text),
 }
 
 /**
@@ -227,6 +252,20 @@ fun MatchSharingSection(
                     Text(stringResource(Res.string.sharing_hide))
                 }
             }
+            if (sharing.canRejectAssignment) {
+                Text(
+                    stringResource(Res.string.sharing_assigned),
+                    style = AdvantlyTheme.typography.body,
+                    modifier = Modifier.testTag("sharing_assigned"),
+                )
+                TextButton(
+                    { confirm = SharingConfirm.REJECT_ASSIGNMENT },
+                    enabled = !state.busy,
+                    modifier = Modifier.testTag("sharing_reject_assignment"),
+                ) {
+                    Text(stringResource(Res.string.sharing_reject), color = AdvantlyTheme.colors.danger)
+                }
+            }
             if (sharing.canReject) {
                 TextButton({ confirm = SharingConfirm.REJECT }, enabled = !state.busy, modifier = Modifier.testTag("sharing_reject")) {
                     Text(stringResource(Res.string.sharing_reject), color = AdvantlyTheme.colors.danger)
@@ -246,7 +285,11 @@ fun MatchSharingSection(
             confirmButton = {
                 TextButton({
                     confirm = null
-                    if (pending == SharingConfirm.REJECT) model.rejectParticipation() else model.hideMatch()
+                    when (pending) {
+                        SharingConfirm.REJECT -> model.rejectParticipation()
+                        SharingConfirm.HIDE -> model.hideMatch()
+                        SharingConfirm.REJECT_ASSIGNMENT -> model.rejectAssignment()
+                    }
                 }, modifier = Modifier.testTag("sharing_confirm")) { Text(stringResource(pending.action)) }
             },
             dismissButton = {

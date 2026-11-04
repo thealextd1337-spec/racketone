@@ -185,7 +185,7 @@ private fun LiveCard(
             color = colors.brand,
         )
         Text(headline(match), style = MaterialTheme.typography.bodyLarge, color = colors.text)
-        Text(stringResource(Res.string.friends_feed_vs, names(match.teamA), names(match.teamB)), color = colors.text2)
+        Text(stringResource(Res.string.friends_feed_vs, names(match, Side.A), names(match, Side.B)), color = colors.text2)
         val score =
             listOfNotNull(
                 match.sets.takeIf { it.isNotEmpty() }?.joinToString("  ") { (a, b) -> "$a:$b" },
@@ -315,7 +315,7 @@ private fun TeamScore(
         horizontalArrangement = Arrangement.spacedBy(Spacing.m),
     ) {
         Column(Modifier.weight(1f)) {
-            Text(names(if (side == Side.A) match.teamA else match.teamB), style = AdvantlyTheme.typography.body, color = colors.text)
+            Text(names(match, side), style = AdvantlyTheme.typography.body, color = colors.text)
             if (entry.serving == side) {
                 Text(stringResource(Res.string.live_serve), style = AdvantlyTheme.typography.caption, color = colors.brand)
             }

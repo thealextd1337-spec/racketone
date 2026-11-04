@@ -1022,4 +1022,23 @@
     <string name="notifications_hint">Get notified when friends add you to a match or ask you to watch or keep score?</string>
     <string name="notifications_hint_enable">Turn on</string>
     <string name="notifications_hint_later">Not now</string>
+    <!-- Cloud-Ansichten (0.6.3): unbenannte bzw. redigierte Plätze -->
+    <string name="player_slot_n">Player %1$d</string>
+    <string name="player_deleted">Deleted player</string>
+    <!-- Gast mit Freund verknüpfen (0.6.3) -->
+    <string name="guest_link">Link to friend</string>
+    <string name="guest_link_choose">Which friend is %1$s?</string>
+    <string name="guest_link_no_friends">You have no friends with an account yet.</string>
+    <string name="guest_link_confirm_title">Link %1$s to %2$s?</string>
+    <string name="guest_link_confirm_text">All matches with %1$s will be assigned to %2$s. %2$s will be notified and can object.</string>
+    <string name="guest_link_confirm">Link</string>
+    <string name="guest_linked_to">linked to %1$s</string>
+    <string name="guest_unlink">Remove link</string>
+    <string name="guest_link_done">%1$s is now linked to %2$s. Matches assigned: %3$d</string>
+    <string name="guest_link_error_not_friend">You are not (or no longer) friends. You can only link to friends.</string>
+    <string name="guest_link_error_linked">This guest is already linked to an account.</string>
+    <string name="guest_link_error_rejected">This person declined being linked to this guest before.</string>
+    <string name="guest_link_error_unavailable">Not possible right now: you are offline or your account is not ready yet. Try again after the next sync.</string>
+    <string name="sharing_assigned">A friend assigned one of their guests to you.</string>
+    <string name="sharing_reject_assignment_text">The assignment is removed for all matches with this guest and blocked for good. The matches disappear from your view.</string>
 </resources>

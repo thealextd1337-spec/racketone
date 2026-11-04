@@ -292,7 +292,7 @@ class VisitorsViewModelTest {
                 )
             model.loadWatching()
             val (running, finished) = state.watching!!
-            assertEquals(listOf("Bob"), running.match.teamA)
+            assertEquals(listOf("Bob"), running.match.teamA.map { it.name })
             assertEquals(listOf(6 to 4), running.match.sets)
             assertEquals(2 to 1, running.games)
             assertEquals("30" to "15", running.points)

@@ -101,7 +101,10 @@ class LiveViewModelTest {
         val entry = liveMatch("m1").toLiveEntry()!!
         assertEquals(LiveRelation.PLAYER, entry.relation)
         assertEquals(Sport.TENNIS, entry.score.match.sport)
-        assertEquals(listOf("Bob") to listOf("Alice"), entry.score.match.teamA to entry.score.match.teamB)
+        assertEquals(
+            listOf(CloudSlot("Bob", "A", 1)) to listOf(CloudSlot("Alice", "B", 1)),
+            entry.score.match.teamA to entry.score.match.teamB,
+        )
         assertEquals(listOf(6 to 4), entry.score.match.sets)
         assertEquals(2 to 1, entry.score.games)
         assertEquals("30" to "15", entry.score.points)

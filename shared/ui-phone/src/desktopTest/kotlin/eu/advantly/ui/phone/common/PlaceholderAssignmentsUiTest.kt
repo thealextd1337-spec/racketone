@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.toAwtImage
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.onNodeWithTag
@@ -20,6 +21,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.runDesktopComposeUiTest
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import eu.advantly.core.model.DeviceId
 import eu.advantly.core.model.Discipline
 import eu.advantly.core.model.Lineup
 import eu.advantly.core.model.Placeholders
@@ -29,10 +31,18 @@ import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.SidePair
+import eu.advantly.data.createInMemoryJvmLocalData
+import eu.advantly.device.link.testing.ManualScheduler
+import eu.advantly.match.session.MatchSession
+import eu.advantly.match.session.SessionConfig
+import eu.advantly.presentation.friends.FriendEntry
 import eu.advantly.presentation.match.MatchSetup
+import eu.advantly.presentation.match.SessionMatchStore
+import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.ui.phone.AdvantlyApp
 import eu.advantly.ui.phone.SessionRig
 import eu.advantly.ui.phone.app.Overlay
+import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import java.io.File
 import java.util.Locale
 import javax.imageio.ImageIO
@@ -168,6 +178,55 @@ class PlaceholderAssignmentsUiTest {
                     }
                     // Die Platzhalterbeschriftung ist unabhängig von gespeicherten Namen.
                     runOnIdle { rig.model.navigator.pop() }
+                }
+            }
+        } finally {
+            Locale.setDefault(previous)
+        }
+    }
+
+    /** plan-0.6.3 §3.4: „Du“ (ohne Namen) und Freunde stehen zur Wahl, belegte Personen nicht; ein Freund wird zugewiesen. */
+    @Test
+    fun selfAndFriendsAreOfferedButSeatedPeopleAreNot() {
+        val previous = Locale.getDefault()
+        try {
+            for (locale in listOf(Locale.GERMANY, Locale.US)) {
+                Locale.setDefault(locale)
+                runDesktopComposeUiTest(width = 400, height = 1400) {
+                    val data = createInMemoryJvmLocalData()
+                    var index = 0
+                    data.accountIdentities.select("scope-alice", "alice", 0, "PHONE") { "alice-${index++}" }
+                    val me = data.players.ensureSelf("", 1) { PlayerId("me") }.id
+                    val source = data.accountIdentities.currentSources().single()
+                    val session =
+                        MatchSession(data, null, ManualScheduler(), SessionConfig(DeviceId(source), PeerKind.PHONE), { 10 })
+                    val store = SessionMatchStore(session)
+                    val bea = store.addGuest("Bea")
+                    val carol = store.addFriend("carol-profile", "Carol")!!
+                    val slot = Placeholders.id("opponent")
+                    val id = session.create(Presets.BADMINTON_1GAME_15.format(), Lineup(listOf(carol.id), listOf(slot), carol.id))
+                    val setup = store.record(id)!!.summary.setup
+                    val friends = listOf(FriendEntry("bob-profile", "Bob"), FriendEntry("carol-profile", "Carol"), FriendEntry("x", null))
+                    setContent {
+                        CompositionLocalProvider(LocalSelfId provides me) {
+                            AdvantlyTheme(darkTheme = true) { PlaceholderAssignments(id, setup, store, store, friends) }
+                        }
+                    }
+                    onNodeWithTag("assign_${slot.value}").performClick()
+                    onNodeWithTag("assign_person_${me.value}").assertTextEquals(if (locale.language == "de") "Du" else "You")
+                    onNodeWithTag("assign_person_${bea.id.value}").assertTextEquals("Bea")
+                    onNodeWithText(if (locale.language == "de") "Freunde" else "Friends", ignoreCase = true).assertExists()
+                    // Carol sitzt schon (als Freund), ein Freund ohne Alias ist nicht wählbar.
+                    onNodeWithTag("assign_friend_carol-profile").assertDoesNotExist()
+                    onNodeWithTag("assign_person_${carol.id.value}").assertDoesNotExist()
+                    onNodeWithTag("assign_friend_x").assertDoesNotExist()
+                    onNodeWithTag("assign_friend_bob-profile").performScrollTo().performClick()
+                    runOnIdle {
+                        val after = store.record(id)!!.summary.setup
+                        assertEquals("Bob", after.player(slot)?.displayName)
+                        assertEquals("bob-profile", store.friendProfile(after.assignedPlayers.getValue(slot).id))
+                    }
+                    store.close()
                 }
             }
         } finally {

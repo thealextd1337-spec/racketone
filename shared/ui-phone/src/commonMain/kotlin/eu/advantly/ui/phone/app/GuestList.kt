@@ -36,6 +36,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import eu.advantly.core.model.Player
 import eu.advantly.core.model.PlayerId
+import eu.advantly.presentation.friends.FriendsViewModel
 import eu.advantly.presentation.match.PlayersPort
 import eu.advantly.ui.phone.designsystem.AdvantlyIcons
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
@@ -44,30 +45,58 @@ import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_cancel
 import eu.advantly.ui.phone.resources.action_save
+import eu.advantly.ui.phone.resources.friends_dismiss
+import eu.advantly.ui.phone.resources.friends_error_rate_limit
+import eu.advantly.ui.phone.resources.friends_unknown
+import eu.advantly.ui.phone.resources.guest_link
+import eu.advantly.ui.phone.resources.guest_link_choose
+import eu.advantly.ui.phone.resources.guest_link_confirm
+import eu.advantly.ui.phone.resources.guest_link_confirm_text
+import eu.advantly.ui.phone.resources.guest_link_confirm_title
+import eu.advantly.ui.phone.resources.guest_link_done
+import eu.advantly.ui.phone.resources.guest_link_error_linked
+import eu.advantly.ui.phone.resources.guest_link_error_not_friend
+import eu.advantly.ui.phone.resources.guest_link_error_rejected
+import eu.advantly.ui.phone.resources.guest_link_error_unavailable
+import eu.advantly.ui.phone.resources.guest_link_no_friends
+import eu.advantly.ui.phone.resources.guest_linked_to
+import eu.advantly.ui.phone.resources.guest_unlink
 import eu.advantly.ui.phone.resources.player_actions
 import eu.advantly.ui.phone.resources.player_delete
 import eu.advantly.ui.phone.resources.player_delete_hint
 import eu.advantly.ui.phone.resources.player_delete_title
+import eu.advantly.ui.phone.resources.player_deleted
 import eu.advantly.ui.phone.resources.player_name_label
 import eu.advantly.ui.phone.resources.player_rename
 import eu.advantly.ui.phone.resources.player_rename_title
 import eu.advantly.ui.phone.resources.profile_players
 import eu.advantly.ui.phone.resources.profile_players_empty
+import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
 /**
  * Spielerliste im Profil: Dummy-/Gastspieler mit „Umbenennen“ und „Löschen“ – nur, wenn dieses Gerät sie angelegt hat
- * (`PlayersPort.canRename`, 00 „Aliase“: keine Spitznamen für Nutzer mit App).
+ * (`PlayersPort.canRename`, 00 „Aliase“: keine Spitznamen für Nutzer mit App). Mit Konto ([friends], aktuelle
+ * Zustimmung) und Server-Stand des Gasts zusätzlich „Mit Freund verknüpfen“ bzw. „Verknüpfung lösen“ (plan-0.6.3 §3.5);
+ * redigierte Gäste (Freund gelöscht, §3.6) gelten nicht als verknüpft und bieten nichts davon an.
  */
 @Composable
 internal fun GuestList(
     players: PlayersPort,
     onHistory: (PlayerId) -> Unit = {},
+    friends: FriendsViewModel? = null,
 ) {
     val colors = AdvantlyTheme.colors
     val guests by players.guests.collectAsState()
     var renaming by rememberSaveable { mutableStateOf<String?>(null) }
     var deleting by rememberSaveable { mutableStateOf<String?>(null) }
+    var linking by rememberSaveable { mutableStateOf<String?>(null) }
+    var linkTo by rememberSaveable { mutableStateOf<String?>(null) }
+    val friendsState = friends?.state?.collectAsState()?.value
+    val links = friendsState?.guestLinks.orEmpty()
+    val known = friendsState?.friends.orEmpty().filterNot { it.alias.isNullOrBlank() }
+
+    fun alias(profileId: String?) = known.firstOrNull { it.profileId == profileId }?.alias
     Text(
         stringResource(Res.string.profile_players).uppercase(),
         style = AdvantlyTheme.typography.overline,
@@ -79,12 +108,82 @@ internal fun GuestList(
     }
     Column(Modifier.testTag("guest_list"), verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
         guests.forEach { guest ->
+            val link = links[guest.id.value]?.takeUnless { it.redacted }
+            val busy = friendsState?.busy == true
             GuestRow(
                 guest,
                 canRename = players.canRename(guest.id),
                 onRename = { renaming = guest.id.value },
                 onDelete = { deleting = guest.id.value },
                 onHistory = { onHistory(guest.id) },
+                redacted = links[guest.id.value]?.redacted == true,
+                linkedTo = link?.friendId?.let { alias(it) ?: stringResource(Res.string.friends_unknown) },
+                onLink = { linking = guest.id.value }.takeIf { link != null && link.friendId == null && !busy },
+                onUnlink = friends?.takeIf { link?.friendId != null && !busy }?.let { model -> { model.unlinkGuest(guest.id.value) } },
+            )
+        }
+    }
+    friendsState?.guestError?.let { error ->
+        Text(stringResource(guestErrorLabel(error)), color = colors.danger, modifier = Modifier.testTag("guest_link_error"))
+        TextButton({ friends.dismissError() }) { Text(stringResource(Res.string.friends_dismiss)) }
+    }
+    friendsState?.guestLinked?.let { done ->
+        val guestName = guests.firstOrNull { it.id.value == done.playerId }?.displayName.orEmpty()
+        Text(
+            stringResource(Res.string.guest_link_done, guestName, alias(done.friendId).orEmpty(), done.matches),
+            style = AdvantlyTheme.typography.body,
+            color = colors.text,
+            modifier = Modifier.testTag("guest_link_done"),
+        )
+        TextButton({ friends.dismissGuestLinked() }, modifier = Modifier.testTag("guest_link_done_ok")) {
+            Text(stringResource(Res.string.friends_dismiss))
+        }
+    }
+    guests.firstOrNull { it.id.value == linking }?.let { guest ->
+        val friendId = linkTo
+        if (friendId == null) {
+            AlertDialog(
+                onDismissRequest = { linking = null },
+                title = { Text(stringResource(Res.string.guest_link_choose, guest.displayName)) },
+                text = {
+                    Column {
+                        if (known.isEmpty()) Text(stringResource(Res.string.guest_link_no_friends))
+                        known.forEach { friend ->
+                            TextButton(
+                                onClick = { linkTo = friend.profileId },
+                                modifier = Modifier.fillMaxWidth().testTag("guest_link_friend_${friend.profileId}"),
+                            ) { Text(friend.alias.orEmpty()) }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = { linking = null }) { Text(stringResource(Res.string.action_cancel)) }
+                },
+                modifier = Modifier.testTag("guest_link_dialog"),
+            )
+        } else {
+            val friendName = alias(friendId).orEmpty()
+            AlertDialog(
+                onDismissRequest = { linkTo = null },
+                title = { Text(stringResource(Res.string.guest_link_confirm_title, guest.displayName, friendName)) },
+                text = { Text(stringResource(Res.string.guest_link_confirm_text, guest.displayName, friendName)) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            friends?.linkGuest(guest.id.value, friendId)
+                            linking = null
+                            linkTo = null
+                        },
+                        modifier = Modifier.testTag("guest_link_confirm"),
+                    ) { Text(stringResource(Res.string.guest_link_confirm)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { linkTo = null }, modifier = Modifier.testTag("guest_link_cancel")) {
+                        Text(stringResource(Res.string.action_cancel))
+                    }
+                },
+                modifier = Modifier.testTag("guest_link_confirm_dialog"),
             )
         }
     }
@@ -121,6 +220,16 @@ internal fun GuestList(
     }
 }
 
+/** Eigene Fehlertexte fürs Verknüpfen; offline, fehlende Bindung und ein noch nicht hochgeladener Gast sind „nicht bereit“. */
+private fun guestErrorLabel(error: String): StringResource =
+    when (error) {
+        "assignee_must_be_friend" -> Res.string.guest_link_error_not_friend
+        "already_assigned" -> Res.string.guest_link_error_linked
+        "assignment_rejected_before" -> Res.string.guest_link_error_rejected
+        "rate_limit_exceeded" -> Res.string.friends_error_rate_limit
+        else -> Res.string.guest_link_error_unavailable
+    }
+
 @Composable
 private fun GuestRow(
     guest: Player,
@@ -128,6 +237,10 @@ private fun GuestRow(
     onRename: () -> Unit,
     onDelete: () -> Unit,
     onHistory: () -> Unit,
+    redacted: Boolean = false,
+    linkedTo: String? = null,
+    onLink: (() -> Unit)? = null,
+    onUnlink: (() -> Unit)? = null,
 ) {
     val colors = AdvantlyTheme.colors
     Column(Modifier.fillMaxWidth()) {
@@ -141,8 +254,22 @@ private fun GuestRow(
                 .padding(start = Spacing.l),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(guest.displayName, style = AdvantlyTheme.typography.label, color = colors.text, modifier = Modifier.weight(1f))
-            if (canRename) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (redacted) stringResource(Res.string.player_deleted) else guest.displayName,
+                    style = AdvantlyTheme.typography.label,
+                    color = colors.text,
+                )
+                if (linkedTo != null) {
+                    Text(
+                        stringResource(Res.string.guest_linked_to, linkedTo),
+                        style = AdvantlyTheme.typography.caption,
+                        color = colors.text2,
+                        modifier = Modifier.testTag("guest_linked_${guest.id.value}"),
+                    )
+                }
+            }
+            if (canRename || onLink != null || onUnlink != null) {
                 var menu by rememberSaveable { mutableStateOf(false) }
                 Box {
                     IconButton(
@@ -152,22 +279,44 @@ private fun GuestRow(
                         Icon(AdvantlyIcons.More, stringResource(Res.string.player_actions, guest.displayName), tint = colors.text2)
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(
-                            text = { Text(stringResource(Res.string.player_rename)) },
-                            onClick = {
-                                menu = false
-                                onRename()
-                            },
-                            modifier = Modifier.testTag("rename_${guest.id.value}"),
-                        )
-                        DropdownMenuItem(
-                            text = { Text(stringResource(Res.string.player_delete), color = colors.danger) },
-                            onClick = {
-                                menu = false
-                                onDelete()
-                            },
-                            modifier = Modifier.testTag("delete_${guest.id.value}"),
-                        )
+                        if (onLink != null) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(Res.string.guest_link)) },
+                                onClick = {
+                                    menu = false
+                                    onLink()
+                                },
+                                modifier = Modifier.testTag("link_${guest.id.value}"),
+                            )
+                        }
+                        if (onUnlink != null) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(Res.string.guest_unlink)) },
+                                onClick = {
+                                    menu = false
+                                    onUnlink()
+                                },
+                                modifier = Modifier.testTag("unlink_${guest.id.value}"),
+                            )
+                        }
+                        if (canRename) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(Res.string.player_rename)) },
+                                onClick = {
+                                    menu = false
+                                    onRename()
+                                },
+                                modifier = Modifier.testTag("rename_${guest.id.value}"),
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(Res.string.player_delete), color = colors.danger) },
+                                onClick = {
+                                    menu = false
+                                    onDelete()
+                                },
+                                modifier = Modifier.testTag("delete_${guest.id.value}"),
+                            )
+                        }
                     }
                 }
             }

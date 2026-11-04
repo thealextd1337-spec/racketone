@@ -4,14 +4,17 @@ import eu.advantly.cloud.sync.LiveMatchesPort
 import eu.advantly.core.model.MatchId
 import eu.advantly.device.link.LiveViewsProvider
 import eu.advantly.match.session.PeerInfo
+import eu.advantly.presentation.friends.CloudSlot
 import eu.advantly.presentation.friends.LiveEntry
 import eu.advantly.presentation.friends.toLiveEntry
 import eu.advantly.presentation.live.LiveTelemetryGate
+import eu.advantly.presentation.match.CloudPlayerName
 import eu.advantly.sync.protocol.LiveView
 import eu.advantly.sync.protocol.LiveViewSubscriptionCodec
 import eu.advantly.sync.protocol.LiveViews
 import eu.advantly.sync.protocol.LiveViewsCodec
 import eu.advantly.sync.protocol.PeerKind
+import eu.advantly.ui.phone.friends.toName
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
@@ -69,6 +72,8 @@ object PhoneLiveViews {
 internal class AccountLiveViews(
     private val port: LiveMatchesPort,
     private val profile: () -> String?,
+    /** Lokalisiert „Spieler N“/„Gelöschter Spieler“ (Handy-Sprache; die Uhr folgt ihr standardmäßig). */
+    private val label: (CloudPlayerName) -> String,
     private val nowMs: () -> Long = System::currentTimeMillis,
     private val awaitAccount: suspend () -> Unit = {},
 ) : LiveViewsProvider {
@@ -76,19 +81,24 @@ internal class AccountLiveViews(
         if (profile() == null) awaitAccount()
         val id = profile() ?: return emptyList()
         val now = nowMs()
-        return port.liveMatches(id).mapNotNull { it.toLiveEntry()?.toLiveView(now) }
+        return port.liveMatches(id).mapNotNull { it.toLiveEntry()?.toLiveView(now, label) }
     }
 }
 
 /** Projektion → Uhr-Anzeige: nur Namen und Spielstand, wie [LiveEntry] (nie Telemetrie oder IDs von Profilen). */
-internal fun LiveEntry.toLiveView(nowMs: Long): LiveView? {
+internal fun LiveEntry.toLiveView(
+    nowMs: Long,
+    label: (CloudPlayerName) -> String,
+): LiveView? {
     val match = score.match
+
+    fun names(team: List<CloudSlot>) = team.joinToString(" / ") { label(it.toName(match.doubles)) }
     return LiveView(
         matchId = MatchId(match.id),
         relation = WireRelation.valueOf(relation.name),
         sport = match.sport ?: return null,
-        teamA = match.teamA.joinToString(" / "),
-        teamB = match.teamB.joinToString(" / "),
+        teamA = names(match.teamA),
+        teamB = names(match.teamB),
         sets = match.sets.map { (a, b) -> listOf(a, b) },
         games = score.games?.let { (a, b) -> listOf(a, b) },
         points = score.points?.let { (a, b) -> listOf(a, b) },
