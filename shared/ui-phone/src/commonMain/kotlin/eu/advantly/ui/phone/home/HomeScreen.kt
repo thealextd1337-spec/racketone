@@ -30,7 +30,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.presentation.match.FavoriteLineup
 import eu.advantly.presentation.match.HealthRecords
@@ -39,7 +38,9 @@ import eu.advantly.presentation.match.MatchSetup
 import eu.advantly.presentation.match.MatchSummary
 import eu.advantly.presentation.match.WallClock
 import eu.advantly.presentation.match.isRated
+import eu.advantly.presentation.stats.HistoryOutcome
 import eu.advantly.presentation.stats.gamesWon
+import eu.advantly.presentation.stats.outcome
 import eu.advantly.ui.phone.app.AdvantlyAppModel
 import eu.advantly.ui.phone.common.AdvantlyCard
 import eu.advantly.ui.phone.common.SectionTitle
@@ -274,7 +275,7 @@ private fun QuickStartCard(
             Text(title, style = AdvantlyTheme.typography.label, color = AdvantlyTheme.colors.text)
             Text(
                 stringResource(sportName(sport)) + " · " + formatLabel(setup.format) + " · " +
-                    stringResource(Res.string.home_versus, teamName(setup, Side.B)),
+                    stringResource(Res.string.home_versus, teamName(setup, setup.ownSide.other)),
                 style = AdvantlyTheme.typography.caption,
                 color = AdvantlyTheme.colors.text2,
             )
@@ -364,7 +365,11 @@ private fun WeekSummary(
     SectionTitle(stringResource(Res.string.home_section_week))
     Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s), modifier = Modifier.testTag("week_summary")) {
         StatTile(week.size.toString(), stringResource(Res.string.home_week_matches), Modifier.weight(1f))
-        StatTile(week.count { it.result.winner == Side.A }.toString(), stringResource(Res.string.home_week_wins), Modifier.weight(1f))
+        StatTile(
+            week.count { it.outcome() == HistoryOutcome.WIN }.toString(),
+            stringResource(Res.string.home_week_wins),
+            Modifier.weight(1f),
+        )
         StatTile(durationText(week.sumOf { it.durationMs }), stringResource(Res.string.home_week_time), Modifier.weight(1f))
     }
 }

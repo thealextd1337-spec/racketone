@@ -1,0 +1,5 @@
+New in 0.6.4:
+• Matches created by friends where you played on the other team: wins, games and records now count correctly for you.
+• Match details: you are always on the “Us” side.
+• Server: invite links hardened (deleted guests, already friends).
+Please test: a friend creates a match with you in team B – check home, history and record.

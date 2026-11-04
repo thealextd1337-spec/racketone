@@ -34,7 +34,8 @@ import kotlinx.coroutines.flow.StateFlow
  * Session-Adapter `SessionMatchStore` (Persistenz, Sync, Single-Scorer über `shared/match-session`), in Tests und
  * Previews die engine-gestützte In-Memory-Implementierung `InMemoryMatchStore`. Vertrag für alle Implementierungen:
  *
- * - **Perspektive:** Side A ist immer das Team des Geräte-Besitzers („Wir“), Side B die Gegner (04 §3.2).
+ * - **Perspektive:** Side A ist immer das Team des Geräte-Besitzers („Wir“), Side B die Gegner (04 §3.2). Ausnahme sind
+ *   gezogene Matches anderer Konten: Dort steht der Besitzer evtl. in B, maßgeblich ist [MatchSetup.ownSide].
  * - **Local-first, synchron:** Ein Kommando (z. B. [LiveMatchPort.recordPoint]) wirkt sofort lokal; kehrt es mit
  *   `true` zurück, zeigt [LiveMatchPort.active] bereits den neuen Zustand. Die UI liest den Wert direkt nach dem
  *   Aufruf (Haptik und Animation im selben Frame, Latenzziel S4). Änderungen von anderen Geräten kommen nur über
@@ -58,6 +59,8 @@ typealias PlayerAssignmentFailure = eu.advantly.match.session.PlayerAssignmentFa
  * @property previousMatchId verknüpftes Vor-Match bei „Noch einer in gleicher Besetzung?“ (02 §5.2)
  * @property linkedProfiles Gast-ID → Freundeskonto, mit dem der Server genau diesen Platz verknüpft hat (Gast-Zuordnung,
  *   plan-0.6.3 §3.5); nur zur Anzeige des Freundesnamens, ohne Eintrag bleibt der Gastname
+ * @property ownSlots Plätze, auf denen der Besitzer selbst steht (Self-Player, Alias, zugewiesen oder per Server mit dem
+ *   eigenen Konto verknüpft); leer, wenn unbekannt
  */
 data class MatchSetup(
     val format: MatchFormat,
@@ -67,8 +70,15 @@ data class MatchSetup(
     val previousMatchId: MatchId? = null,
     val assignedPlayers: Map<PlayerId, Player> = emptyMap(),
     val linkedProfiles: Map<PlayerId, String> = emptyMap(),
+    val ownSlots: Set<PlayerId> = emptySet(),
 ) {
     val sport: Sport get() = format.sport
+
+    /**
+     * Eigene Seite für Statistik und Bilanz: B nur, wenn der Besitzer dort und nicht in A steht (z. B. im Match eines
+     * Freundes); sonst A wie bei eigenen Matches (plan-pro §2.3).
+     */
+    val ownSide: Side get() = if (lineup.b.any { it in ownSlots } && lineup.a.none { it in ownSlots }) Side.B else Side.A
 
     /** Spieler zur ID oder `null`. */
     fun player(id: PlayerId): Player? =

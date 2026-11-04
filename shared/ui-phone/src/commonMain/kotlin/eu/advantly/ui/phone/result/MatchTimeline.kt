@@ -340,7 +340,8 @@ private fun CourseChart(
             for (game in section.games) {
                 val x0 = xOf(game.startMs).toPx()
                 val x1 = xOf(game.endMs).toPx()
-                val margin = game.game.margin
+                // Ausschlag nach oben = Führung der eigenen Seite (in Matches anderer Konten evtl. B)
+                val margin = if (setup.ownSide == Side.A) game.game.margin else -game.game.margin
                 val height = abs(margin).toFloat() / maxMargin * (middle - 10.dp.toPx())
                 val top = if (margin >= 0) middle - height else middle
                 val color =
@@ -379,7 +380,7 @@ private fun CourseChart(
                     drawCircle(colors.text, 2.6.dp.toPx(), Offset(center, y))
                 }
                 game.game.server?.let { server ->
-                    val y = if (server == Side.A) middle - 5.dp.toPx() else middle + 5.dp.toPx()
+                    val y = if (server == setup.ownSide) middle - 5.dp.toPx() else middle + 5.dp.toPx()
                     drawCircle(colors.bg, 3.6.dp.toPx(), Offset(center, y))
                     drawCircle(colors.hint, 2.8.dp.toPx(), Offset(center, y))
                 }
@@ -450,7 +451,7 @@ private fun CourseChart(
             val members = slot.members.map { section.moments[it].index }
             val shown = members.firstOrNull { it == selectedMoment } ?: members.minBy { importance(stats.moments[it]) }
             val moment = stats.moments[shown]
-            val color = markerColor(moment, colors)
+            val color = markerColor(moment, colors, setup.ownSide)
             val description =
                 members
                     .map { i ->
@@ -618,10 +619,11 @@ private fun importance(moment: TimelineMoment): Int = KIND_ORDER.indexOfFirst { 
 private fun markerColor(
     moment: TimelineMoment,
     colors: AdvantlyColors,
+    own: Side,
 ): Color =
     when (KIND_ORDER.first { it in moment.moment.kinds }) {
         MomentKind.MATCH_WON, MomentKind.SET_WON, MomentKind.COMEBACK -> colors.text
-        MomentKind.BREAK -> if (moment.moment.side == Side.A) colors.teamUsChart else colors.teamThemChart
+        MomentKind.BREAK -> if (moment.moment.side == own) colors.teamUsChart else colors.teamThemChart
         MomentKind.TIEBREAK_STARTED -> colors.text2
         else -> colors.hint
     }

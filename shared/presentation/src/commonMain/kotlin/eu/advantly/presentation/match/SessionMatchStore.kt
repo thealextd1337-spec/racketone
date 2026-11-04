@@ -999,16 +999,29 @@ class SessionMatchStore(
 
     private fun assignmentsOf(matchId: MatchId): Map<PlayerId, Player> = data.assignments(matchId).mapValues { it.value.masked() }
 
-    private fun setupOf(record: StoredMatch): MatchSetup =
-        MatchSetup(
+    private fun setupOf(record: StoredMatch): MatchSetup {
+        val assigned = assignmentsOf(record.id)
+        val linkedToMe =
+            data.accountIdentities.profile
+                ?.let { data.cloudPulls.ownSlots(it, record.id.value) }
+                .orEmpty()
+
+        fun isMe(id: PlayerId?) = id != null && (id == selfFlow.value.id || id in aliases)
+        val own =
+            (record.lineup.a + record.lineup.b).filterTo(mutableSetOf()) { slot ->
+                isMe(slot) || isMe(assigned[slot]?.id) || slot.value in linkedToMe
+            }
+        return MatchSetup(
             record.format,
             record.lineup,
             record.meta,
             playersOf(record.lineup, record.id),
             record.previousMatchId,
-            assignmentsOf(record.id),
+            assigned,
             linkedOf(record.id),
+            own,
         )
+    }
 
     /** Gast-Zuordnungen dieses Matches laut Pull (plan-0.6.3 §3.5), nicht global je Gast: übersprungene Matches fehlen. */
     private fun linkedOf(matchId: MatchId): Map<PlayerId, String> =

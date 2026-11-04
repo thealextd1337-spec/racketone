@@ -35,7 +35,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
-import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.presentation.match.MatchHistoryPort
 import eu.advantly.presentation.match.MatchSummary
@@ -199,7 +198,7 @@ fun HistoryScreen(
         item {
             val rated = shown.filter { it.isRated }
             Text(
-                stringResource(Res.string.history_record, rated.count { it.result.winner == Side.A }, rated.size),
+                stringResource(Res.string.history_record, rated.count { it.outcome() == HistoryOutcome.WIN }, rated.size),
                 style = AdvantlyTheme.typography.label,
                 color = AdvantlyTheme.colors.text2,
                 modifier = Modifier.padding(horizontal = Spacing.screenEdgeCompact, vertical = Spacing.m).testTag("history_record"),
@@ -281,7 +280,8 @@ internal fun HistoryItem(
         SportIcon(sport, size = 28.dp)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                stringResource(sportName(sport)) + " · " + stringResource(Res.string.home_versus, teamName(match.setup, Side.B)),
+                stringResource(sportName(sport)) + " · " +
+                    stringResource(Res.string.home_versus, teamName(match.setup, match.setup.ownSide.other)),
                 style = AdvantlyTheme.typography.label,
                 color = colors.text,
             )
