@@ -1025,4 +1025,20 @@
     <!-- Cloud-Ansichten (0.6.3): unbenannte bzw. redigierte Plätze -->
     <string name="player_slot_n">Spieler %1$d</string>
     <string name="player_deleted">Gelöschter Spieler</string>
+    <!-- Gast mit Freund verknüpfen (0.6.3) -->
+    <string name="guest_link">Mit Freund verknüpfen</string>
+    <string name="guest_link_choose">Welcher Freund ist %1$s?</string>
+    <string name="guest_link_no_friends">Du hast noch keine Freunde mit Konto.</string>
+    <string name="guest_link_confirm_title">%1$s mit %2$s verknüpfen?</string>
+    <string name="guest_link_confirm_text">Alle Matches mit %1$s werden %2$s zugeordnet. %2$s wird benachrichtigt und kann widersprechen.</string>
+    <string name="guest_link_confirm">Verknüpfen</string>
+    <string name="guest_linked_to">verknüpft mit %1$s</string>
+    <string name="guest_unlink">Verknüpfung lösen</string>
+    <string name="guest_link_done">%1$s ist jetzt mit %2$s verknüpft. Zugeordnete Matches: %3$d</string>
+    <string name="guest_link_error_not_friend">Ihr seid nicht (mehr) befreundet. Verknüpfen geht nur mit Freunden.</string>
+    <string name="guest_link_error_linked">Dieser Gast ist schon mit einem Konto verknüpft.</string>
+    <string name="guest_link_error_rejected">Diese Person hat die Zuordnung dieses Gasts früher abgelehnt.</string>
+    <string name="guest_link_error_unavailable">Gerade nicht möglich: Du bist offline oder dein Konto ist noch nicht bereit. Versuch es nach dem nächsten Abgleich erneut.</string>
+    <string name="sharing_assigned">Ein Freund hat dir einen seiner Gäste zugeordnet.</string>
+    <string name="sharing_reject_assignment_text">Die Zuordnung wird für alle Matches mit diesem Gast gelöst und dauerhaft gesperrt. Die Matches verschwinden aus deiner Sicht.</string>
 </resources>

@@ -24,7 +24,23 @@ interface SharedMatchesLocal {
         profileId: String,
         matchId: String,
     ): Map<String, String>
+
+    /** Eigene Gäste mit Server-Stand (Gast-ID → Verknüpfung, plan-0.6.3 §3.5); Gäste ohne gezogenen Stand fehlen. */
+    fun guestLinks(profileId: String): Map<String, GuestLink> = emptyMap()
 }
+
+/** Eigener Gast laut Pull: [friendId] verknüpftes Freundeskonto; [redacted] (z. B. Freund gelöscht): nicht mehr verknüpfbar. */
+data class GuestLink(
+    val friendId: String? = null,
+    val redacted: Boolean = false,
+)
+
+/** Hinweis nach „Mit Freund verknüpfen“: [matches] zugeordnete Matches. */
+data class GuestLinked(
+    val playerId: String,
+    val friendId: String,
+    val matches: Int,
+)
 
 /**
  * Geteiltes Match eines Freundes (Feed, L13): ausschließlich anzeigbare Felder der bereinigten Sicht – keine Profil-,
@@ -77,6 +93,8 @@ data class MatchSharing(
     val gone: Boolean = false,
     /** Server-Hinweise je Platz (Slot-ID → Grund) zur zuletzt hochgeladenen Besetzung. */
     val linkNotes: Map<String, String> = emptyMap(),
+    /** Ein Freund hat mir seinen Gast zugeordnet (`assigned`): „Das war ich nicht“ für alle Matches dieses Gasts. */
+    val canRejectAssignment: Boolean = false,
 )
 
 internal fun PulledMatch.toFeed(): FeedMatch {

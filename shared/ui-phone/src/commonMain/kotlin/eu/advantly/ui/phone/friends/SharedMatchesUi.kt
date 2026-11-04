@@ -55,6 +55,7 @@ import eu.advantly.ui.phone.resources.friends_unknown
 import eu.advantly.ui.phone.resources.history_corrected
 import eu.advantly.ui.phone.resources.player_deleted
 import eu.advantly.ui.phone.resources.player_slot_n
+import eu.advantly.ui.phone.resources.sharing_assigned
 import eu.advantly.ui.phone.resources.sharing_default_hint
 import eu.advantly.ui.phone.resources.sharing_default_loading
 import eu.advantly.ui.phone.resources.sharing_default_retry
@@ -66,6 +67,7 @@ import eu.advantly.ui.phone.resources.sharing_note_duplicate
 import eu.advantly.ui.phone.resources.sharing_note_not_friend
 import eu.advantly.ui.phone.resources.sharing_note_rejected
 import eu.advantly.ui.phone.resources.sharing_reject
+import eu.advantly.ui.phone.resources.sharing_reject_assignment_text
 import eu.advantly.ui.phone.resources.sharing_reject_text
 import eu.advantly.ui.phone.resources.sharing_share
 import eu.advantly.ui.phone.resources.sharing_share_hint
@@ -181,6 +183,7 @@ private enum class SharingConfirm(
 ) {
     REJECT(Res.string.sharing_reject, Res.string.sharing_reject_text),
     HIDE(Res.string.sharing_hide, Res.string.sharing_hide_text),
+    REJECT_ASSIGNMENT(Res.string.sharing_reject, Res.string.sharing_reject_assignment_text),
 }
 
 /**
@@ -249,6 +252,20 @@ fun MatchSharingSection(
                     Text(stringResource(Res.string.sharing_hide))
                 }
             }
+            if (sharing.canRejectAssignment) {
+                Text(
+                    stringResource(Res.string.sharing_assigned),
+                    style = AdvantlyTheme.typography.body,
+                    modifier = Modifier.testTag("sharing_assigned"),
+                )
+                TextButton(
+                    { confirm = SharingConfirm.REJECT_ASSIGNMENT },
+                    enabled = !state.busy,
+                    modifier = Modifier.testTag("sharing_reject_assignment"),
+                ) {
+                    Text(stringResource(Res.string.sharing_reject), color = AdvantlyTheme.colors.danger)
+                }
+            }
             if (sharing.canReject) {
                 TextButton({ confirm = SharingConfirm.REJECT }, enabled = !state.busy, modifier = Modifier.testTag("sharing_reject")) {
                     Text(stringResource(Res.string.sharing_reject), color = AdvantlyTheme.colors.danger)
@@ -268,7 +285,11 @@ fun MatchSharingSection(
             confirmButton = {
                 TextButton({
                     confirm = null
-                    if (pending == SharingConfirm.REJECT) model.rejectParticipation() else model.hideMatch()
+                    when (pending) {
+                        SharingConfirm.REJECT -> model.rejectParticipation()
+                        SharingConfirm.HIDE -> model.hideMatch()
+                        SharingConfirm.REJECT_ASSIGNMENT -> model.rejectAssignment()
+                    }
                 }, modifier = Modifier.testTag("sharing_confirm")) { Text(stringResource(pending.action)) }
             },
             dismissButton = {

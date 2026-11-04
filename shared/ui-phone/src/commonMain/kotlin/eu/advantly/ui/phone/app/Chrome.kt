@@ -283,7 +283,7 @@ fun ProfileScreen(
         account?.friends?.let { ShareDefaultSection(it) }
         // Nur mit Konto und Push-fähiger Plattform (Android mit Firebase); iOS und Builds ohne Firebase blenden ihn aus.
         if (account != null && notifications != null) NotificationsSection(notifications)
-        if (players != null) GuestList(players, onPlayerHistory)
+        if (players != null) GuestList(players, onPlayerHistory, account?.friends)
         if (onSupport != null) LinkRow(stringResource(Res.string.support_open), "profile_support", onSupport)
         if (onRestorePrevious != null) {
             LinkRow(stringResource(Res.string.profile_restore_previous), "profile_restore_previous", onRestorePrevious)

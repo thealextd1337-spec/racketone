@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import eu.advantly.core.model.MatchId
+import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.presentation.auth.AuthStep
 import eu.advantly.presentation.auth.AuthViewModel
@@ -53,6 +54,7 @@ import eu.advantly.ui.phone.app.rememberAdvantlyAppModel
 import eu.advantly.ui.phone.app.whatsNewPoints
 import eu.advantly.ui.phone.auth.AccountGate
 import eu.advantly.ui.phone.common.LocalArchivedPlayerIds
+import eu.advantly.ui.phone.common.LocalGuestAliases
 import eu.advantly.ui.phone.common.LocalSelfAliases
 import eu.advantly.ui.phone.common.LocalSelfId
 import eu.advantly.ui.phone.common.PlaceholderAssignments
@@ -203,7 +205,24 @@ fun AdvantlyApp(
             navigator.top == null &&
             openMatches.none { it.isRunning }
     BackHandler(enabled = showWhatsNew) { seeWhatsNew() }
+    val friendsState =
+        authModel
+            ?.friends
+            ?.state
+            ?.collectAsState()
+            ?.value
+    val guestAliases =
+        remember(friendsState?.guestLinks, friendsState?.friends) {
+            friendsState
+                ?.guestLinks
+                ?.mapNotNull { (guest, link) ->
+                    val alias = friendsState.friends.firstOrNull { it.profileId == link.friendId }?.alias
+                    alias?.takeIf { it.isNotBlank() && !link.redacted }?.let { PlayerId(guest) to it }
+                }?.toMap()
+                .orEmpty()
+        }
     CompositionLocalProvider(
+        LocalGuestAliases provides guestAliases,
         LocalSelfId provides self.id,
         LocalSelfAliases provides aliases,
         LocalArchivedPlayerIds provides archived,
@@ -241,14 +260,7 @@ fun AdvantlyApp(
                     }
                 }
                 // Freunde nur mit nutzbarem Konto; sonst liefert das ViewModel eine leere Liste.
-                val friends =
-                    authModel
-                        ?.friends
-                        ?.state
-                        ?.collectAsState()
-                        ?.value
-                        ?.friends
-                        .orEmpty()
+                val friends = friendsState?.friends.orEmpty()
                 when (val top = navigator.top.takeUnless { accountRequired }) {
                     Overlay.Wizard -> {
                         Column(Modifier.fillMaxSize().safeContentPadding()) {
