@@ -507,6 +507,82 @@ class CloudUploadRunnerTest {
             }
         }
 
+    /**
+     * Review 0.6.3: Ein neues, ungültiges Match füllt mit 600 Events den Batch, seine Spieler sind schon oben, und kein Teil
+     * des Batches wird bestätigt. Die frische Zurückstellung macht das schon hochgeladene Match mit neuen Events sendbar:
+     * kein BLOCKED, sondern weiter.
+     */
+    @Test
+    fun freshHoldWithoutAnyAckStillContinuesWithTheRemainingSelection(): Unit =
+        runBlocking {
+            Fixture(answer = { batch, _ ->
+                val response = accepted(batch)
+                response.copy(
+                    matches = response.matches.map { if (it.id == "bad") ItemResult(it.id, "rejected", "invalid") else it },
+                    events =
+                        batch.events.map {
+                            if (it.matchId == "bad") ItemResult(it.id, "rejected", "unknown_match") else ItemResult(it.id, "accepted")
+                        },
+                )
+            }).use { fixture ->
+                fixture.backend.bindDevice("caller-phone")
+                val runner = fixture.runner()
+                assertEquals(CloudUploadOutcome.DRAINED, runner.uploadNow().outcome)
+
+                // „bad“ < „match“: die 600 Events des neuen, ungültigen Matches liegen vorne; Spieler sind schon bestätigt.
+                val format = Presets.TENNIS_SINGLES_BO3.format()
+                val lineup = Lineup(listOf(PlayerId("me")), listOf(PlayerId("guest")), PlayerId("me"))
+                fixture.data.events.append(
+                    ScoreEvent(
+                        EventId("bad-1"),
+                        MatchId("bad"),
+                        DeviceId("phone-source"),
+                        1001,
+                        1,
+                        1,
+                        null,
+                        MatchCreated(format, lineup, createdBy = PlayerId("me")),
+                    ).toStoredEvent(),
+                )
+                for (seq in 1002L..1600L) {
+                    fixture.data.events.append(
+                        StoredEvent("bad-$seq", "bad", "phone-source", seq, seq, """{"type":"PointWon","side":"A"}""", type = "PointWon"),
+                    )
+                }
+                fixture.data.matches.insertIfAbsent(MatchId("bad"), format, lineup, MatchMeta(), 1)
+                fixture.data.matches.updateProgress(MatchId("bad"), MatchStatus.IN_PROGRESS, ScoreSummary(eventCount = 600), 600)
+                for (seq in 2L..4L) fixture.append(seq)
+                fixture.progress(4)
+
+                val first = runner.uploadNow()
+                assertEquals(CloudUploadOutcome.PARTIAL, first.outcome, "Folge-Batch ist sendbar: nicht BLOCKED")
+                assertTrue(
+                    fixture.batches
+                        .last()
+                        .players
+                        .isEmpty(),
+                )
+                assertTrue(
+                    fixture.batches
+                        .last()
+                        .events
+                        .all { it.matchId == "bad" },
+                )
+
+                val second = runner.uploadNow()
+                assertEquals(
+                    listOf("e2", "e3", "e4"),
+                    fixture.batches
+                        .last()
+                        .events
+                        .map { it.id },
+                )
+                assertTrue((2..4).all { fixture.data.cloud.uploaded("e$it") == true })
+                assertEquals(CloudUploadOutcome.BLOCKED, second.outcome)
+                assertEquals(600L, second.inventory?.pendingEvents, "Events des ungültigen Matches bleiben ausstehend")
+            }
+        }
+
     @Test
     fun metadataNotesAndMissingResponsesStopTheRunAndRemainVisible(): Unit =
         runBlocking {
