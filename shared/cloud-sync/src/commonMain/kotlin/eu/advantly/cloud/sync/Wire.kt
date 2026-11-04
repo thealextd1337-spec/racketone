@@ -103,7 +103,7 @@ data class ParticipantDto(
 data class ProjectionDto(
     /** `in_progress` | `paused` | `awaiting_decision` | `finished` (MatchStatus kleingeschrieben) */
     val status: String,
-    /** `retired` | `walkover` | `abandoned` | `stopped` oder `null` */
+    /** `completed` | `draw` | `retired` | `walkover` | `abandoned` | `stopped` oder `null` */
     val resultReason: String? = null,
     val winner: String? = null,
     val startedAt: String? = null,
