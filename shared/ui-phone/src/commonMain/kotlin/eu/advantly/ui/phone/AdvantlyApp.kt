@@ -24,7 +24,6 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import eu.advantly.core.model.MatchId
-import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.presentation.auth.AuthStep
 import eu.advantly.presentation.auth.AuthViewModel
@@ -54,7 +53,7 @@ import eu.advantly.ui.phone.app.rememberAdvantlyAppModel
 import eu.advantly.ui.phone.app.whatsNewPoints
 import eu.advantly.ui.phone.auth.AccountGate
 import eu.advantly.ui.phone.common.LocalArchivedPlayerIds
-import eu.advantly.ui.phone.common.LocalGuestAliases
+import eu.advantly.ui.phone.common.LocalFriendAliases
 import eu.advantly.ui.phone.common.LocalSelfAliases
 import eu.advantly.ui.phone.common.LocalSelfId
 import eu.advantly.ui.phone.common.PlaceholderAssignments
@@ -211,18 +210,17 @@ fun AdvantlyApp(
             ?.state
             ?.collectAsState()
             ?.value
-    val guestAliases =
-        remember(friendsState?.guestLinks, friendsState?.friends) {
+    // Welcher Platz verknüpft ist, steht je Match im Setup (Pull); hier nur die Namen der Freunde.
+    val friendAliases =
+        remember(friendsState?.friends) {
             friendsState
-                ?.guestLinks
-                ?.mapNotNull { (guest, link) ->
-                    val alias = friendsState.friends.firstOrNull { it.profileId == link.friendId }?.alias
-                    alias?.takeIf { it.isNotBlank() && !link.redacted }?.let { PlayerId(guest) to it }
-                }?.toMap()
+                ?.friends
+                ?.mapNotNull { friend -> friend.alias?.takeIf { it.isNotBlank() }?.let { friend.profileId to it } }
+                ?.toMap()
                 .orEmpty()
         }
     CompositionLocalProvider(
-        LocalGuestAliases provides guestAliases,
+        LocalFriendAliases provides friendAliases,
         LocalSelfId provides self.id,
         LocalSelfAliases provides aliases,
         LocalArchivedPlayerIds provides archived,

@@ -465,6 +465,58 @@ class CloudPullStoreTest {
         }
     }
 
+    /**
+     * Review 0.6.3: Gast-Zuordnungen gelten je Match und Platz. assign_player überspringt Matches, in denen der Freund schon
+     * steht oder die er abgelehnt hat; dort bleibt der Platz unverknüpft. Gelöschte Profile zählen nicht.
+     */
+    @Test
+    fun assignedParticipantsFollowTheServerLinkOfThisMatchOnly() {
+        createInMemoryJvmDriver().use { driver ->
+            val data = LocalData(driver).selectPullAccount()
+            val run = data.cloudPulls.beginRun("alice") {}.runSerial
+
+            fun part(
+                slot: String,
+                player: String?,
+                profile: String?,
+                status: String?,
+                deleted: Boolean = false,
+            ) = """{"slotId":"$slot","team":"B","position":1,"playerId":${player?.let { "\"$it\"" }},
+                "profileId":${profile?.let { "\"$it\"" }},"linkStatus":${status?.let { "\"$it\"" }},
+                "displayName":"Test1","deletedProfile":$deleted}"""
+
+            fun match(
+                id: String,
+                vararg parts: String,
+            ) = CloudPullMatch(id, 1, """{"participants":[${parts.joinToString(",")}]}""", "member", 1, 0, false, pullRecord(id))
+            data.cloudPulls.commitMetadata(
+                "alice",
+                run,
+                0,
+                CloudPullMetadataPage(
+                    listOf(
+                        match("linked", part("s1", "test1", "anja", "assigned")),
+                        // Anja stand schon auf einem anderen Platz: Test1 bleibt unverknüpft.
+                        match("skipped", part("s1", "test1", null, null), part("s2", null, "anja", "linked")),
+                        // Von Anja abgelehnt (match_link_rejections): ebenfalls unverknüpft.
+                        match("rejected", part("s1", "test1", null, null)),
+                        match("deleted", part("s1", "test1", "anja", "assigned", deleted = true)),
+                    ),
+                    emptyList(),
+                    emptyList(),
+                    1,
+                    false,
+                    1,
+                ),
+            ) {}
+            assertEquals(mapOf("test1" to "anja"), data.cloudPulls.assignedParticipants("alice", "linked"))
+            assertEquals(emptyMap(), data.cloudPulls.assignedParticipants("alice", "skipped"))
+            assertEquals(emptyMap(), data.cloudPulls.assignedParticipants("alice", "rejected"))
+            assertEquals(emptyMap(), data.cloudPulls.assignedParticipants("alice", "deleted"))
+            assertEquals(emptyMap(), data.cloudPulls.assignedParticipants("bob", "linked"))
+        }
+    }
+
     @Test
     fun versionsAreMonotoneCloudUpdatesAreMaterializedAndLocalChangesKeepTheirOwnContent() {
         createInMemoryJvmDriver().use { driver ->

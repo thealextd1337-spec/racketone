@@ -31,12 +31,17 @@ import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.EndReason
 import eu.advantly.core.scoring.Presets
 import eu.advantly.core.scoring.SidePair
+import eu.advantly.data.CloudPullMetadataPage
+import eu.advantly.data.CloudPullPlayer
+import eu.advantly.data.LocalPlayer
+import eu.advantly.data.PlayerKind
 import eu.advantly.data.createInMemoryJvmLocalData
 import eu.advantly.device.link.testing.ManualScheduler
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.SessionConfig
 import eu.advantly.presentation.friends.FriendEntry
 import eu.advantly.presentation.match.MatchSetup
+import eu.advantly.presentation.match.PlayerAssignmentFailure
 import eu.advantly.presentation.match.SessionMatchStore
 import eu.advantly.sync.protocol.PeerKind
 import eu.advantly.ui.phone.AdvantlyApp
@@ -231,6 +236,71 @@ class PlaceholderAssignmentsUiTest {
             }
         } finally {
             Locale.setDefault(previous)
+        }
+    }
+
+    /**
+     * Review 0.6.3: Test1 ist per Gast-Zuordnung mit Anja verknüpft und sitzt im Match. Anja wird weder angeboten noch an
+     * der Zuweisungsgrenze (MatchSession) mit ihrer anderen lokalen ID angenommen.
+     */
+    @Test
+    fun friendSeatedThroughLinkedGuestIsNeitherOfferedNorAssignable() {
+        runDesktopComposeUiTest(width = 400, height = 1400) {
+            val data = createInMemoryJvmLocalData()
+            var index = 0
+            data.accountIdentities.select("scope-alice", "alice", 0, "PHONE") { "alice-${index++}" }
+            val me = data.players.ensureSelf("", 1) { PlayerId("me") }.id
+            val source = data.accountIdentities.currentSources().single()
+            val session = MatchSession(data, null, ManualScheduler(), SessionConfig(DeviceId(source), PeerKind.PHONE), { 10 })
+            val store = SessionMatchStore(session)
+            val test1 = store.addGuest("Test1")
+            val run = data.cloudPulls.beginRun("alice") {}.runSerial
+            val json =
+                """{"id":"${test1.id.value}","kind":"guest","displayName":"Test1","owned":true,"profileId":"anja-profile","serverVersion":1}"""
+            data.cloudPulls.commitMetadata(
+                "alice",
+                run,
+                0,
+                CloudPullMetadataPage(
+                    emptyList(),
+                    listOf(CloudPullPlayer(test1.id.value, 1, json, true, LocalPlayer(test1.id, "Test1", PlayerKind.GUEST, 1, null))),
+                    emptyList(),
+                    1,
+                    false,
+                    1,
+                ),
+            ) {}
+            val slot = Placeholders.id("opponent")
+            val id = session.create(Presets.BADMINTON_1GAME_15.format(), Lineup(listOf(test1.id), listOf(slot), test1.id))
+            val setup = store.record(id)!!.summary.setup
+            setContent {
+                CompositionLocalProvider(LocalSelfId provides me) {
+                    AdvantlyTheme(darkTheme = true) {
+                        PlaceholderAssignments(
+                            id,
+                            setup,
+                            store,
+                            store,
+                            listOf(FriendEntry("anja-profile", "Anja"), FriendEntry("bob-profile", "Bob")),
+                        )
+                    }
+                }
+            }
+            onNodeWithTag("assign_${slot.value}").performClick()
+            onNodeWithTag("assign_friend_anja-profile").assertDoesNotExist()
+            onNodeWithTag("assign_friend_bob-profile").assertExists()
+            runOnIdle {
+                val anja = store.addFriend("anja-profile", "Anja")!!
+                assertEquals(PlayerAssignmentFailure.OCCUPIED, store.assignmentFailure(id, slot, anja.id))
+                assertFalse(store.assignPlayer(id, slot, anja.id))
+                assertEquals(
+                    null,
+                    store
+                        .record(id)!!
+                        .summary.setup.assignedPlayers[slot],
+                )
+            }
+            store.close()
         }
     }
 }

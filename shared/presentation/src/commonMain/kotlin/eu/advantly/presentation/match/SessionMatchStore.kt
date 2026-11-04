@@ -592,6 +592,8 @@ class SessionMatchStore(
 
     override fun friendProfile(id: PlayerId): String? = data.accountIdentities.profile?.let { data.players.friendProfile(it, id) }
 
+    override fun linkedProfile(id: PlayerId): String? = data.linkedProfile(id)
+
     override fun saveFavorite(setup: MatchSetup): FavoriteLineup {
         rememberPlayers(setup.players)
         val stored = StoredFavorite(ids.newId().value, setup.format, setup.lineup, setup.meta)
@@ -760,7 +762,8 @@ class SessionMatchStore(
         val focused = m.id == state.match?.id
         return LiveMatchSnapshot(
             matchId = m.id,
-            setup = MatchSetup(m.format, m.lineup, m.meta, playersOf(m.lineup, m.id), m.previousMatchId, assignmentsOf(m.id)),
+            setup =
+                MatchSetup(m.format, m.lineup, m.meta, playersOf(m.lineup, m.id), m.previousMatchId, assignmentsOf(m.id), linkedOf(m.id)),
             state = m.state,
             canUndo = m.canUndo,
             canRedo = m.canRedo,
@@ -1004,7 +1007,15 @@ class SessionMatchStore(
             playersOf(record.lineup, record.id),
             record.previousMatchId,
             assignmentsOf(record.id),
+            linkedOf(record.id),
         )
+
+    /** Gast-Zuordnungen dieses Matches laut Pull (plan-0.6.3 §3.5), nicht global je Gast: übersprungene Matches fehlen. */
+    private fun linkedOf(matchId: MatchId): Map<PlayerId, String> =
+        data.accountIdentities.profile
+            ?.let { profile -> data.cloudPulls.assignedParticipants(profile, matchId.value) }
+            .orEmpty()
+            .mapKeys { PlayerId(it.key) }
 
     private fun playersOf(
         lineup: Lineup,

@@ -984,7 +984,15 @@ class MatchSession(
             return PlayerAssignmentFailure.INVALID_PLAYER
         }
         val occupied = data.resolvedLineup(record).let { it.a + it.b } - listOfNotNull(assigned[slot]?.id)
-        if (occupied.any { it == playerId || (data.isSelf(it) && data.isSelf(playerId)) }) return PlayerAssignmentFailure.OCCUPIED
+        // Dieselbe Person auch über Freund bzw. Gast-Zuordnung (z. B. Test1 → Anja und Anja als Freund).
+        val profile = data.linkedProfile(playerId)
+        if (occupied.any {
+                it == playerId || (data.isSelf(it) && data.isSelf(playerId)) ||
+                    (profile != null && data.linkedProfile(it) == profile)
+            }
+        ) {
+            return PlayerAssignmentFailure.OCCUPIED
+        }
         return null
     }
 

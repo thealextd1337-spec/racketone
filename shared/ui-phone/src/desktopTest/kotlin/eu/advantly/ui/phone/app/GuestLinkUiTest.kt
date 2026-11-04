@@ -27,12 +27,18 @@ import eu.advantly.cloud.sync.GuestLinksPort
 import eu.advantly.cloud.sync.PulledFriendship
 import eu.advantly.cloud.sync.PulledMatch
 import eu.advantly.cloud.sync.PulledParticipant
+import eu.advantly.core.model.Lineup
+import eu.advantly.core.model.Placeholders
+import eu.advantly.core.model.Player
+import eu.advantly.core.model.PlayerId
+import eu.advantly.core.scoring.Presets
 import eu.advantly.presentation.friends.FriendsViewModel
 import eu.advantly.presentation.friends.GuestLink
 import eu.advantly.presentation.friends.SharedMatchesLocal
 import eu.advantly.presentation.match.InMemoryMatchStore
+import eu.advantly.presentation.match.MatchSetup
 import eu.advantly.ui.phone.auth.FakePhoneAuth
-import eu.advantly.ui.phone.common.LocalGuestAliases
+import eu.advantly.ui.phone.common.LocalFriendAliases
 import eu.advantly.ui.phone.common.playerName
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.friends.MatchSharingSection
@@ -225,12 +231,42 @@ class GuestLinkUiTest {
                 val guests = Guests().apply { failure = "assignee_must_be_friend" }
                 // Kim hat noch keinen Server-Stand (nicht hochgeladen): keine Verknüpfung angeboten.
                 val model = model(scope, guests, mapOf(id to GuestLink(), gone.id.value to GuestLink("anja-id", redacted = true)))
+                // Verknüpfung je Match und Platz (Pull), nicht global je Gast: assign_player überspringt Matches, in denen
+                // Anja schon steht, und solche, die sie abgelehnt hat (match_link_rejections). Dort bleibt „Test1“.
+                val me = Player(PlayerId("me"), "Alex")
+                val format = Presets.TENNIS_SINGLES_BO3.format()
+                val linked =
+                    MatchSetup(
+                        format,
+                        Lineup(listOf(me.id), listOf(guest.id), me.id),
+                        players = listOf(me, guest),
+                        linkedProfiles =
+                            mapOf(guest.id to "anja-id"),
+                    )
+                val skipped = linked.copy(linkedProfiles = emptyMap())
+                // Nachträglich auf einen Platzhalter gesetzt: Setup trägt die Platz-ID, die Verknüpfung die Gast-ID.
+                val slot = Placeholders.id("opponent")
+                val assigned =
+                    MatchSetup(
+                        format,
+                        Lineup(listOf(me.id), listOf(slot), me.id),
+                        players = listOf(me, Player(slot, "", isPlaceholder = true)),
+                        assignedPlayers = mapOf(slot to guest),
+                        linkedProfiles = mapOf(guest.id to "anja-id"),
+                    )
+                val redactedAssigned =
+                    assigned.copy(assignedPlayers = mapOf(slot to Player(guest.id, "", isPlaceholder = true)), linkedProfiles = emptyMap())
                 setContent {
                     AdvantlyTheme(darkTheme = true) {
                         Column {
                             GuestList(store, friends = model)
-                            CompositionLocalProvider(LocalGuestAliases provides mapOf(guest.id to "Anja")) {
-                                Text(playerName(guest), modifier = Modifier.testTag("own_match_name"))
+                            CompositionLocalProvider(LocalFriendAliases provides mapOf("anja-id" to "Anja")) {
+                                Text(playerName(linked, guest.id), modifier = Modifier.testTag("own_match_name"))
+                                Text(playerName(assigned, slot), modifier = Modifier.testTag("own_assigned_name"))
+                                Text(playerName(skipped, guest.id), modifier = Modifier.testTag("own_skipped_name"))
+                                Text(playerName(guest), modifier = Modifier.testTag("guest_plain_name"))
+                                // Redigiert zugewiesen (Store maskiert als Platzhalter): Platzbezeichnung, nicht „You“.
+                                Text(playerName(redactedAssigned, slot), modifier = Modifier.testTag("own_redacted_name"))
                             }
                         }
                     }
@@ -260,8 +296,12 @@ class GuestLinkUiTest {
                     onNodeWithTag("rename_cancel").performClick()
                     onNodeWithTag("guest_actions_${offline.id.value}").performClick()
                     onNodeWithTag("link_${offline.id.value}").assertDoesNotExist()
-                    // Eigene Matches zeigen den Freund statt des Gasts.
+                    // Eigene Matches zeigen den Freund statt des Gasts, aber nur an verknüpften Plätzen.
                     onNodeWithTag("own_match_name").assertTextEquals("Anja")
+                    onNodeWithTag("own_assigned_name").assertTextEquals("Anja")
+                    onNodeWithTag("own_skipped_name").assertTextEquals("Test1")
+                    onNodeWithTag("guest_plain_name").assertTextEquals("Test1")
+                    onNodeWithTag("own_redacted_name").assertTextEquals("Opponent")
                 } finally {
                     model.close()
                     scope.cancel()

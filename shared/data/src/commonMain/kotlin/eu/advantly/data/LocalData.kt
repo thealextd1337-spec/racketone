@@ -291,6 +291,15 @@ class LocalData(
         return true
     }
 
+    /**
+     * Konto hinter dem lokalen Spieler [id] im aktuellen Konto: als Freund eingetragen oder als eigener Gast einem Freund
+     * zugeordnet (plan-0.6.3 §3.5). Zwei Plätze mit demselben Konto sind dieselbe Person.
+     */
+    fun linkedProfile(id: PlayerId): String? {
+        val account = accountIdentities.profile ?: return null
+        return players.friendProfile(account, id) ?: cloudPulls.assignedProfile(account, id.value)
+    }
+
     /** [id] ist der Besitzer selbst oder einer seiner Aliase. */
     fun isSelf(id: PlayerId): Boolean = id == players.self()?.id || id in selfAliases()
 

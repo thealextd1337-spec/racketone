@@ -89,7 +89,8 @@ fun PlaceholderAssignments(
     val self = players.self.value.id
     // Der eigene Spieler sitzt auch über einen Alias (z. B. alter Uhr-Self); dann nicht noch einmal anbieten.
     val selfSeated = occupied.any { it == self || it in LocalSelfAliases.current }
-    val seatedFriends = remember(occupied) { occupied.mapNotNull(players::friendProfile).toSet() }
+    // Auch über Gast-Zuordnung: Sitzt Test1 (verknüpft mit Anja), ist Anja belegt.
+    val seatedFriends = remember(occupied) { occupied.mapNotNull(players::linkedProfile).toSet() }
     val offeredFriends = friends.filter { !it.alias.isNullOrBlank() && it.profileId !in seatedFriends }
     val offeredIds = offeredFriends.mapTo(HashSet()) { it.profileId }
     val choices =
@@ -97,7 +98,7 @@ fun PlaceholderAssignments(
             .distinctBy { it.id }
             .filterNot { it.id in occupied || it.isPlaceholder || (it.id == self && selfSeated) }
             // „Du“ hat lokal keinen Namen; Freunde stehen unten mit ihrem aktuellen Alias.
-            .filter { (it.displayName.isNotBlank() || it.id == self) && players.friendProfile(it.id) !in offeredIds }
+            .filter { (it.displayName.isNotBlank() || it.id == self) && players.linkedProfile(it.id) !in offeredIds }
 
     fun assign(id: PlayerId?) {
         if (history.assignPlayer(matchId, slot, id)) {

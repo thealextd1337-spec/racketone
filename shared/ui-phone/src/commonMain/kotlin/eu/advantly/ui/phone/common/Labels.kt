@@ -65,8 +65,11 @@ import org.jetbrains.compose.resources.stringResource
 val LocalSelfId = staticCompositionLocalOf<PlayerId?> { null }
 val LocalSelfAliases = staticCompositionLocalOf<Set<PlayerId>> { emptySet() }
 
-/** Mit einem Freund verknüpfte eigene Gäste (plan-0.6.3 §3.5): Gast-ID → Alias des Freundes, nur zur Anzeige. */
-val LocalGuestAliases = staticCompositionLocalOf<Map<PlayerId, String>> { emptyMap() }
+/**
+ * Aliase der Freunde (Konto-ID → Alias), nur zur Anzeige: Ein eigener Gast heißt in einem Match so wie der Freund, mit dem
+ * der Server genau diesen Platz verknüpft hat ([MatchSetup.linkedProfiles], plan-0.6.3 §3.5).
+ */
+val LocalFriendAliases = staticCompositionLocalOf<Map<String, String>> { emptyMap() }
 
 /** Archivierte Personen nur aus Auswahlen ausblenden, nie aus historischen Matchdaten. */
 internal val LocalArchivedPlayerIds = staticCompositionLocalOf<Set<PlayerId>> { emptySet() }
@@ -98,7 +101,6 @@ fun sportColor(sport: Sport): Color {
 @Composable
 fun playerName(player: Player?): String {
     if (player == null) return ""
-    LocalGuestAliases.current[player.id]?.let { return it }
     if (player.displayName.isBlank() && player.id == LocalSelfId.current) return stringResource(Res.string.player_you)
     return player.displayName.ifBlank { stringResource(Res.string.player_you) }
 }
@@ -109,6 +111,11 @@ fun playerName(
     setup: MatchSetup,
     id: PlayerId,
 ): String {
+    // Nachträglich zugewiesene Person mit ihrer echten ID: [setup.player] trägt die Platz-ID, die Verknüpfung nicht.
+    val person = setup.assignedPlayers[id]?.id ?: id
+    setup.linkedProfiles[person]?.let { LocalFriendAliases.current[it] }?.let { return it }
+    // Ohne Namen (redigiert) maskiert die Store-Schicht sie als Platzhalter: dann wie bisher die Platzbezeichnung.
+    setup.assignedPlayers[id]?.takeUnless { it.isPlaceholder }?.let { return playerName(it) }
     if (setup.player(id)?.isPlaceholder != true) return playerName(setup.player(id))
     val side = setup.lineup.sideOf(id)
     val index = side?.let { setup.lineup.players(it).indexOf(id) } ?: 0
