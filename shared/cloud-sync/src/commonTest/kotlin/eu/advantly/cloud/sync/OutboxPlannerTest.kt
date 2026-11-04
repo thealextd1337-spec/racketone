@@ -110,4 +110,27 @@ class OutboxPlannerTest {
         assertEquals(mapOf(id to "correction_forbidden"), update.rejected)
         assertEquals(emptySet(), update.retry)
     }
+
+    /** Plan 0.6.3 §3.2: Nur endgültige Match-Ablehnungen gesendeter Matches stellen zurück; `not_owner` nicht. */
+    @Test
+    fun finalMatchRejectionsAreHeld() {
+        val sent =
+            OutboxPlanner
+                .plan(
+                    listOf(event("m1", 1), event("m2", 2), event("m3", 3), event("m4", 4)),
+                    headers = listOf("m1", "m2", "m3", "m4").associateWith { header(it) },
+                ).single()
+        val response =
+            PushResponse(
+                matches =
+                    listOf(
+                        ItemResult("m1", "rejected", "invalid"),
+                        ItemResult("m2", "rejected", "court_invalid"),
+                        ItemResult("m3", "not_owner"),
+                        ItemResult("m4", "rejected", "tournament_forbidden"),
+                        ItemResult("unsent", "rejected", "invalid"),
+                    ),
+            )
+        assertEquals(setOf("m1", "m2", "m4"), OutboxPlanner.evaluate(sent, response).held)
+    }
 }

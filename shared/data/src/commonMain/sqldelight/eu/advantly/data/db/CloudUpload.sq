@@ -11,6 +11,18 @@ CREATE TABLE cloud_upload_epoch (
     generation INTEGER NOT NULL CHECK (generation >= 0)
 );
 
+-- Plan 0.6.3 §3.2: Matches, die der Server endgültig abgelehnt hat (`invalid`, `court_invalid`, `tournament_forbidden`),
+-- mit den gesendeten Revisionen von Kopf und Besetzung und dem Zeitpunkt der Ablehnung. Die Auswahl überspringt sie, bis
+-- sich eine der Revisionen ändert, 24 h vergangen sind, der Nutzer manuell abgleicht oder das Konto wechselt.
+-- Die Events bleiben ausstehend; hier wird nichts gelöscht.
+CREATE TABLE cloud_upload_hold (
+    match_id TEXT NOT NULL PRIMARY KEY,
+    profile_id TEXT NOT NULL,
+    header_revision INTEGER NOT NULL,
+    participants_revision INTEGER NOT NULL,
+    held_at_ms INTEGER NOT NULL
+);
+
 generation:
 SELECT coalesce((SELECT generation FROM cloud_upload_epoch WHERE singleton = 1), 0);
 
@@ -55,3 +67,25 @@ rejectedCountForProfile:
 SELECT count(*) FROM match_event e JOIN cloud_device_owner o ON o.device_id = e.device_id
 WHERE e.cloud_state = 2 AND o.profile_id = :profileId
   AND NOT EXISTS (SELECT 1 FROM match_tombstone t WHERE t.match_id = e.match_id);
+
+hold:
+INSERT OR REPLACE INTO cloud_upload_hold (match_id, profile_id, header_revision, participants_revision, held_at_ms)
+VALUES (?, ?, ?, ?, ?);
+
+releaseHold:
+DELETE FROM cloud_upload_hold WHERE match_id = ?;
+
+releaseProfileHolds:
+DELETE FROM cloud_upload_hold WHERE profile_id = ?;
+
+releaseOtherProfileHolds:
+DELETE FROM cloud_upload_hold WHERE profile_id != ?;
+
+-- Noch wirksame Zurückstellungen: gleiche Revisionen und Ablehnung innerhalb des Fensters (eine zurückgestellte Uhr
+-- gibt frei statt zu verlängern).
+heldMatches:
+SELECT h.match_id FROM cloud_upload_hold h
+WHERE h.profile_id = :profileId AND h.held_at_ms > :sinceMs AND h.held_at_ms <= :nowMs
+  AND h.header_revision = coalesce((SELECT m.revision FROM cloud_metadata m WHERE m.kind = 'HEADER' AND m.entity_id = h.match_id), 0)
+  AND h.participants_revision =
+    coalesce((SELECT m.revision FROM cloud_metadata m WHERE m.kind = 'PARTICIPANTS' AND m.entity_id = h.match_id), 0);

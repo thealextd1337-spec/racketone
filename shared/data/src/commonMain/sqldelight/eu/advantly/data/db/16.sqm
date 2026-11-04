@@ -1,0 +1,8 @@
+-- Plan 0.6.3 §3.2: Vom Server dauerhaft abgelehnte Matches zurückstellen (siehe CloudUpload.sq).
+CREATE TABLE cloud_upload_hold (
+    match_id TEXT NOT NULL PRIMARY KEY,
+    profile_id TEXT NOT NULL,
+    header_revision INTEGER NOT NULL,
+    participants_revision INTEGER NOT NULL,
+    held_at_ms INTEGER NOT NULL
+);

@@ -127,7 +127,9 @@ internal class PhoneSyncCoordinator(
         return next
     }
 
+    /** Nur vom Nutzer ausgelöst: gibt zurückgestellte, vom Server abgelehnte Matches frei. Automatisch: [request]. */
     override fun syncNow() {
+        upload.releaseHolds()
         trigger(null)
     }
 
@@ -145,7 +147,10 @@ internal class PhoneSyncCoordinator(
         if (cycle == null && mutable.value.status == PhoneSyncStatus.CONNECTION_FAILED) launch(expected)
     }
 
-    /** Geplanter Auftrag; mit [profile] nur für das Konto, für das er geplant wurde. `null`: kein Lauf. */
+    /**
+     * Automatischer Anlass (geplanter Auftrag, Zuschauer, Übergabe); mit [profile] nur für das Konto, für das er geplant
+     * wurde, ohne für das aktuelle. Gibt keine Zurückstellungen frei. Rückgabe `null`: kein Lauf.
+     */
     fun request(profile: String?): Job? = trigger(profile)
 
     /** Ein laufender Lauf deckt den Auslöser ab; was er nicht mehr sah, holt sein Folgelauf nach. */

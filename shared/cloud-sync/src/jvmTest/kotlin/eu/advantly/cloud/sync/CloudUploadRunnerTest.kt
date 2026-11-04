@@ -49,14 +49,14 @@ class CloudUploadRunnerTest {
         val answer: suspend (PushBatch, Int) -> PushResponse = { batch, _ -> accepted(batch) },
     ) : AutoCloseable {
         val driver = InventoryRecordingDriver(createInMemoryJvmDriver())
-        val data = LocalData(driver)
+        var clock = 100L
+        val data = LocalData(driver) { clock }
         val hostThread = Thread.currentThread()
         var credentials: CloudCredentials? = CloudCredentials("alice", "session", "token")
         val gate = CloudSessionGate({ credentials }, data.cloudUploads, { Thread.currentThread() === hostThread })
         val batches = mutableListOf<PushBatch>()
         val bindings = mutableListOf<String>()
         val registeredDevices = mutableSetOf<String>()
-        var clock = 100L
         var failureStatus: HttpStatusCode? = null
         var failureBody = ""
         val http =
@@ -373,7 +373,8 @@ class CloudUploadRunnerTest {
                 assertEquals(CloudUploadOutcome.PARTIAL, runner.uploadNow().outcome)
                 val stuck = runner.uploadNow()
                 assertEquals(CloudUploadOutcome.BLOCKED, stuck.outcome)
-                assertEquals(2, fixture.batches.size)
+                // Seit 0.6.3 zurückgestellt: der zweite Lauf sendet gar nicht erst.
+                assertEquals(1, fixture.batches.size)
                 assertEquals(1L, stuck.inventory?.pendingEvents)
                 assertTrue(
                     fixture.data.cloud
@@ -383,6 +384,123 @@ class CloudUploadRunnerTest {
                 )
                 // Nach der Server-Korrektur lädt der nächste Anlass alles hoch, nichts ging verloren.
                 serverFixed = true
+                // Bis dahin ist das Match zurückgestellt (Plan 0.6.3 §3.2): kein weiterer Versand ohne neuen Anlass.
+                assertEquals(CloudUploadOutcome.BLOCKED, runner.uploadNow().outcome)
+                assertEquals(1, fixture.batches.size)
+                fixture.backend.releaseUploadHolds()
+                val drained = runner.uploadNow()
+                assertEquals(CloudUploadOutcome.DRAINED, drained.outcome)
+                assertEquals(0L, drained.inventory?.pendingEvents)
+            }
+        }
+
+    /**
+     * Plan 0.6.3 §3.2: Ein dauerhaft abgelehntes Match mit über 500 Events füllt nicht mehr jeden Batch. Es bleibt
+     * ausstehend und kommt nach neuer Metadaten-Revision, 24 h oder manuellem Abgleich wieder dran.
+     */
+    @Test
+    fun permanentlyRejectedMatchNoLongerStarvesOtherMatches(): Unit =
+        runBlocking {
+            var serverFixed = false
+            Fixture(eventCount = 600, answer = { batch, _ ->
+                val response = accepted(batch)
+                if (serverFixed) {
+                    response
+                } else {
+                    response.copy(
+                        matches =
+                            response.matches.map { if (it.id == "match") ItemResult(it.id, "rejected", "invalid") else it },
+                        events =
+                            batch.events.map {
+                                if (it.matchId == "match") ItemResult(it.id, "rejected", "unknown_match") else ItemResult(it.id, "accepted")
+                            },
+                    )
+                }
+            }).use { fixture ->
+                // Zweites, gültiges Match; „match“ < „other“, die 600 Events des abgelehnten liegen also vorne.
+                val format = Presets.TENNIS_SINGLES_BO3.format()
+                val lineup = Lineup(listOf(PlayerId("me")), listOf(PlayerId("guest")), PlayerId("me"))
+                fixture.data.events.append(
+                    ScoreEvent(
+                        EventId("other-genesis"),
+                        MatchId("other"),
+                        DeviceId("phone-source"),
+                        1001,
+                        1,
+                        1,
+                        null,
+                        MatchCreated(format, lineup, createdBy = PlayerId("me")),
+                    ).toStoredEvent(),
+                )
+                fixture.data.matches.insertIfAbsent(MatchId("other"), format, lineup, MatchMeta(), 1)
+                for (seq in 1002L..1005L) {
+                    fixture.data.events.append(
+                        StoredEvent(
+                            "other-$seq",
+                            "other",
+                            "phone-source",
+                            seq,
+                            seq,
+                            """{"type":"PointWon","side":"A"}""",
+                            type = "PointWon",
+                        ),
+                    )
+                }
+                fixture.data.matches.updateProgress(MatchId("other"), MatchStatus.IN_PROGRESS, ScoreSummary(eventCount = 5), 5)
+                fixture.backend.bindDevice("caller-phone")
+                val runner = fixture.runner()
+
+                assertEquals(CloudUploadOutcome.PARTIAL, runner.uploadNow().outcome)
+                val blocked = runner.uploadNow()
+                assertEquals(CloudUploadOutcome.BLOCKED, blocked.outcome)
+                assertEquals(2, fixture.batches.size)
+                assertEquals(
+                    (1001L..1005L).map {
+                        if (it ==
+                            1001L
+                        ) {
+                            "other-genesis"
+                        } else {
+                            "other-$it"
+                        }
+                    },
+                    fixture.batches[1].events.map { it.id },
+                )
+                assertTrue((listOf("other-genesis") + (1002..1005).map { "other-$it" }).all { fixture.data.cloud.uploaded(it) == true })
+                assertEquals(600L, blocked.inventory?.pendingEvents, "Events des abgelehnten Matches bleiben ausstehend")
+                assertTrue(
+                    fixture.data.cloud
+                        .rejectedEvents()
+                        .isEmpty(),
+                )
+                assertEquals(CloudUploadOutcome.BLOCKED, runner.uploadNow().outcome)
+                assertEquals(2, fixture.batches.size, "Zurückgestellt: kein erneuter Versand")
+
+                // Neue Metadaten-Revision (Besetzung): wieder dran, erneut abgelehnt, wieder zurückgestellt.
+                fixture.data.players.rename(PlayerId("guest"), "Beatrice")
+                runner.uploadNow()
+                assertEquals(
+                    "match",
+                    fixture.batches[2]
+                        .events
+                        .first()
+                        .matchId,
+                )
+                val afterRename = fixture.batches.size
+                assertEquals(CloudUploadOutcome.BLOCKED, runner.uploadNow().outcome)
+                assertEquals(afterRename, fixture.batches.size)
+
+                // 24 h nach der Ablehnung: wieder dran; die erneute Ablehnung startet die Frist neu.
+                fixture.clock += 24 * 60 * 60 * 1000L
+                runner.uploadNow()
+                assertEquals(afterRename + 1, fixture.batches.size)
+                fixture.clock += 23 * 60 * 60 * 1000L
+                assertEquals(CloudUploadOutcome.BLOCKED, runner.uploadNow().outcome)
+                assertEquals(afterRename + 1, fixture.batches.size)
+
+                // Manueller Abgleich nach der Server-Korrektur: alles oben, nichts verloren.
+                serverFixed = true
+                fixture.backend.releaseUploadHolds()
                 val drained = runner.uploadNow()
                 assertEquals(CloudUploadOutcome.DRAINED, drained.outcome)
                 assertEquals(0L, drained.inventory?.pendingEvents)

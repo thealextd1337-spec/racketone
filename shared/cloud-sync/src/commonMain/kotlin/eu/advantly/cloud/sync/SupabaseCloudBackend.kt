@@ -147,6 +147,8 @@ class SupabaseCloudBackend internal constructor(
         return captureUpload(limit)
     }
 
+    override fun releaseUploadHolds() = sessions.releaseUploadHolds(sessions.capture())
+
     override fun uploadInventory(attempt: CloudUploadAttempt) = readUploadStatus(attempt).inventory
 
     override fun readUploadStatus(attempt: CloudUploadAttempt?): CloudUploadStatus {
@@ -187,7 +189,15 @@ class SupabaseCloudBackend internal constructor(
                 throw CloudException("cloud_response_invalid", false)
             }
         val update = OutboxPlanner.evaluate(sent, response)
-        sessions.acknowledge(attempt.lease, attempt.snapshot, update.uploaded, update.rejected, metadata, linkNotes(metadata, response))
+        sessions.acknowledge(
+            attempt.lease,
+            attempt.snapshot,
+            update.uploaded,
+            update.rejected,
+            metadata,
+            linkNotes(metadata, response),
+            update.held,
+        )
         return response
     }
 

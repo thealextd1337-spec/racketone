@@ -240,7 +240,7 @@ internal class PhoneAccountCore private constructor(
      * Zuschauer (F16): Benennungen warten, bis der Match-Kopf hochgeladen ist (oder das Match als Mitglied gezogen
      * wurde), und gehen nach jedem Abgleich hinaus.
      */
-    val visitors = VisitorQueue(record, backend, ::onServer) { sync.syncNow() }
+    val visitors = VisitorQueue(record, backend, ::onServer) { sync.request(null) }
 
     private fun onServer(
         profile: String,
@@ -251,7 +251,7 @@ internal class PhoneAccountCore private constructor(
         HandoverPoll(SystemClock::elapsedRealtime, { delayMs ->
             runtime.scope.launch {
                 delay(delayMs)
-                sync.syncNow()
+                sync.request(null)
             }
         })
 
@@ -276,7 +276,7 @@ internal class PhoneAccountCore private constructor(
             System::currentTimeMillis,
         ) {
             handoverPoll.restart()
-            sync.syncNow()
+            sync.request(null)
         }
 
     private suspend fun flushVisitors() {

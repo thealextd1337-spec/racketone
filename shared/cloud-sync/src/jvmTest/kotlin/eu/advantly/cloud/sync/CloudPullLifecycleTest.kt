@@ -693,6 +693,8 @@ class CloudPullLifecycleTest {
                     // Tabelle aus 14.sqm (Plan Puls H4) ebenfalls.
                     driver.execute(null, "DROP TRIGGER health_series_cleanup", 0)
                     driver.execute(null, "DROP TABLE health_series", 0)
+                    // Tabelle aus 16.sqm (Plan 0.6.3 §3.2) ebenfalls.
+                    driver.execute(null, "DROP TABLE cloud_upload_hold", 0)
                     AdvantlyDatabase.Schema.migrate(driver, 10, LocalData.SCHEMA_VERSION).value
                 }
                 reopen(file).use { f ->
