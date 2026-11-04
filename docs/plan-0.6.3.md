@@ -1,17 +1,20 @@
-# Plan 0.6.3: „Spieler N“ statt „?“, Upload robuster gegen abgelehnte Matches
+# Plan 0.6.3: „Spieler N“, Gast mit Freund verknüpfen, Upload robuster
 
 > Status: Entwurf 2026-11-04 · Bezug: 0.6.1 (PR #93, Upload-Fix leere Namen), Review GPT-6 Astra zu PR #93,
 > 0.6.2 (PR #96) · Version 0.6.3, Build 16 (versionCodes 161/162)
 
 ## 1. Ziel
 
-Drei Nacharbeiten aus 0.6.1/0.6.2:
+Nacharbeiten aus 0.6.1/0.6.2 und Nutzerwünsche vom 04.11.2026:
 
 1. **Anzeige:** Plätze ohne Namen stehen in Cloud-Ansichten als „?“. Stattdessen erscheint überall „Spieler 1“, „Spieler 2“ …
    (EN „Player 1“, „Player 2“ …).
 2. **Aushungern:** Ein dauerhaft abgelehntes Match darf den Upload der Events anderer Matches nicht aufhalten.
 3. **Doppelte Position:** Haben zwei Plätze dieselbe Team-Position, wird nur dieses Match abgelehnt, nicht der ganze
    Upload-Batch.
+4. **Platzhalter zuweisen:** In der nachträglichen Zuweisung stehen auch Freunde aus der Freundesliste und „Du“ zur Wahl.
+5. **Gast mit Freund verknüpfen:** Einmalig alle Matches eines Gasts (z. B. „Test1“) einem Freund (z. B. Anja) zuordnen.
+   Der Feldtest folgt mit 0.6.3.
 
 ## 2. Ausgangslage (Stand 0.6.2)
 
@@ -73,6 +76,49 @@ Drei Nacharbeiten aus 0.6.1/0.6.2:
   nicht je Zeile.
 - Umsetzung als Seam-Ersatz wie in den Vormigrationen. Signatur, Owner, ACL, `security definer` und `search_path` bleiben.
 
+### 3.4 Platzhalter-Auswahl: Freunde und „Du“ (`ui-phone`, `presentation`)
+
+- `PlaceholderAssignments` bietet heute nur zuletzt gesehene Mitspieler, Gäste und den eigenen Spieler an. Personen ohne Namen
+  filtert es aus, und der eigene Spieler hat lokal keinen Namen, fällt also immer weg.
+- **Neu:**
+  - Freunde aus der Freundesliste (Spieler-Art FRIEND, wie im Match-Assistenten) werden angeboten.
+  - „Du“ wird lokalisiert angezeigt (wie im Assistenten) und nicht mehr wegen des leeren Namens ausgefiltert.
+  - Bereits belegte Personen bleiben ausgeschlossen.
+- Wird ein Freund zugewiesen, verknüpft der nächste Upload den Platz mit seinem Konto (`profileId` aus `friendPlayerQueries`).
+  Der Server benachrichtigt ihn wie gehabt (`match_shared`).
+
+### 3.5 Gast mit Freund verknüpfen (`cloud-sync`, `presentation`, `ui-phone`)
+
+- **Server:** Bereits vorhanden (Migration `20261015000700_rpc_zuweisung_claim.sql`, mit Rate-Limit-Fassung).
+  - `public.assign_player(player, profile)` ordnet alle bisherigen Teilnehmer-Zeilen des Gasts dem Freund zu.
+    Übersprungen werden Matches, in denen er schon steht oder die er abgelehnt hat. Die Funktion benachrichtigt ihn
+    (`player_assigned`) und gibt die Anzahl der Matches zurück.
+  - `public.unassign_player(player)` nimmt die Zuordnung zurück.
+  - `public.reject_player_assignment(player)` ist „Das war ich nicht“ des Freundes.
+  - Künftige Uploads mit diesem Gast werden automatisch verknüpft (`push_participants`: `players.profile_id` → `assigned`).
+  - Zuerst prüfen: Sind diese RPCs mit dem Cloud-Binding und der Versionssperre des Clients aufrufbar, wie die übrigen
+    `cloud_*_v1`? Wenn nicht, schlanke `cloud_*_v1`-Hüllen per Migration ergänzen. Keine fachliche Änderung.
+- **App, Anleger:**
+  - In der Gästeverwaltung (Profil bzw. Personen) bekommt jeder Gast die Aktion „Mit Freund verknüpfen“, danach die
+    Freundeswahl.
+  - Bestätigung: „Alle Matches mit Test1 werden Anja zugeordnet. Anja wird benachrichtigt und kann widersprechen.“
+  - Danach ein Hinweis mit der Anzahl verknüpfter Matches.
+  - Ein verknüpfter Gast zeigt „verknüpft mit Anja“ und die Aktion „Verknüpfung lösen“.
+  - In den eigenen Matches erscheint statt des Gastnamens der Name des Freundes.
+- **App, Freund:**
+  - Push und Text gibt es schon (`PLAYER_ASSIGNED`). Die Matches erscheinen über den normalen Pull in seinem Verlauf.
+  - Dort kann er für die Zuordnung „Das war ich nicht“ wählen (`reject_player_assignment`). Danach bekommt er diesen Gast
+    nie wieder zugeordnet.
+- **Fehlerfälle mit eigenem Text (DE/EN):**
+  - nicht (mehr) befreundet
+  - schon verknüpft
+  - früher abgelehnt
+  - offline bzw. Konto nicht bereit
+- Nur mit Konto und aktueller Zustimmung. Ohne Cloud ist die Aktion ausgeblendet.
+- **Datenschutz:** Keine neuen Datenarten. Die Verknüpfung von Teilnehmern mit Freundeskonten steht schon in der
+  Datenschutzerklärung (Freunde/geteilte Matches). Vor dem Release mit §4.3 der Erklärung abgleichen. Falls ein Satz fehlt,
+  den Nutzer fragen (neue Fassung = neue Bestätigung).
+
 ## 4. Tests
 
 - **3.1:** Kotlin-Tests für die Nummerierung (Einzel/Doppel, `?`/leer/null, verknüpft, redigiert). UI-Tests DE/EN für
@@ -85,6 +131,10 @@ Drei Nacharbeiten aus 0.6.1/0.6.2:
   Erwartet: Der Batch ist erfolgreich, das betroffene Match ist `rejected/invalid`, das andere `created`.
   Ein Platztausch A1 ↔ A2 im Update bleibt erlaubt.
   Der Test muss den deferred Constraint wirklich auslösen (nicht nur bis zum Rollback laufen).
+- **3.4:** UI-Test (`desktopTest`): Freund und „Du“ stehen in der Auswahl, belegte Personen nicht. Die Zuweisung eines
+  Freundes setzt beim Upload `profileId`.
+- **3.5:** HTTP-Tests für die drei Aufrufe inkl. Fehlercodes (`cloud-sync`). ViewModel-Tests (Bestätigen, Anzahl, Lösen,
+  Fehlertexte). UI-Tests DE/EN. pgTAP nur für neue Hüllen-RPCs (Binding, Rechte).
 - Der Vertragstest App↔Server (Fixture `cloud_sync_push_placeholder_match.json`, pgTAP 450) bleibt grün.
 
 ## 5. Release
