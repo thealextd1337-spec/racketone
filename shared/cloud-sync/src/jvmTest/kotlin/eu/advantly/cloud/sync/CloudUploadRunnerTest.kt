@@ -9,6 +9,7 @@ import eu.advantly.core.model.PlayerId
 import eu.advantly.core.scoring.MatchCreated
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.Presets
+import eu.advantly.core.scoring.ResultReason
 import eu.advantly.core.scoring.ScoreEvent
 import eu.advantly.data.CloudMetadataKind
 import eu.advantly.data.CloudUploadInventory
@@ -38,6 +39,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.measureTime
@@ -172,6 +174,67 @@ class CloudUploadRunnerTest {
             driver.close()
         }
     }
+
+    @Test
+    fun rejectedCompletedProjectionIsRetriedAfterTheServerAcceptsTheResultReason() =
+        runBlocking {
+            var acceptsCompleted = false
+            var serverStatus = "in_progress"
+            Fixture(answer = { batch, _ ->
+                val response = accepted(batch)
+                response.copy(
+                    matches =
+                        response.matches.map { result ->
+                            val projection = batch.matches.single { it.id == result.id }.projection
+                            if (projection?.resultReason == "completed" && !acceptsCompleted) {
+                                result.copy(projection = "invalid")
+                            } else {
+                                projection?.let { serverStatus = it.status }
+                                result
+                            }
+                        },
+                )
+            }).use { f ->
+                f.backend.bindDevice("caller-phone")
+                val runner = f.runner()
+                val initial = runner.uploadNow()
+                assertEquals(CloudUploadOutcome.DRAINED, initial.outcome, initial.toString())
+                f.data.matches.updateProgress(
+                    MatchId("match"),
+                    MatchStatus.FINISHED,
+                    ScoreSummary(reason = ResultReason.COMPLETED, eventCount = 1, lastEventAtMs = 1_000),
+                    1_000,
+                )
+                assertEquals(CloudUploadOutcome.PARTIAL, runner.uploadNow().outcome)
+                assertEquals("in_progress", serverStatus)
+                val pending = f.data.cloud.metadataState(CloudMetadataKind.PROJECTION, "match")!!
+                assertTrue(pending.selected.revision > pending.uploadedRevision)
+                val projection =
+                    assertNotNull(
+                        f.batches
+                            .last()
+                            .matches
+                            .single()
+                            .projection,
+                    )
+                assertEquals("finished", projection.status)
+                assertEquals("completed", projection.resultReason)
+                assertEquals("1970-01-01T00:00:01Z", projection.endedAt)
+                assertNull(projection.liveState)
+
+                acceptsCompleted = true
+                assertEquals(CloudUploadOutcome.DRAINED, runner.uploadNow().outcome)
+                assertEquals("finished", serverStatus)
+                assertEquals(
+                    projection,
+                    f.batches
+                        .last()
+                        .matches
+                        .single()
+                        .projection,
+                )
+            }
+        }
 
     @Test
     fun lostResponseRetriesIdenticalSelectionAndLeavesConcurrentRevisionsPending(): Unit =
