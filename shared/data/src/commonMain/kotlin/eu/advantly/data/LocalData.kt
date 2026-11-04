@@ -9,6 +9,7 @@ import eu.advantly.core.model.PlayerId
 import eu.advantly.core.scoring.MatchCreated
 import eu.advantly.core.scoring.PlayerAssignments
 import eu.advantly.data.db.AdvantlyDatabase
+import kotlin.time.Clock
 
 /**
  * Lokale Datenbank eines Geräts (01 §5.1, Single Source of Truth): Event-Log, Match-Köpfe, Spieler,
@@ -19,6 +20,8 @@ import eu.advantly.data.db.AdvantlyDatabase
  */
 class LocalData(
     driver: SqlDriver,
+    /** Wanduhr, bisher nur für die Zurückstellung abgelehnter Uploads ([CloudUploadStore]); Tests setzen feste Zeiten. */
+    nowMs: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) {
     private val database = AdvantlyDatabase(driver)
     val replicas: ReplicaLifecycleStore = ReplicaLifecycleStore(database, this)
@@ -63,7 +66,7 @@ class LocalData(
         )
     val cloud: CloudSyncRepository = CloudSyncRepository(database, rawEvents, replicas::sanitizeLegacyEvent, ::redactedAssignmentSlots)
     val cloudPulls: CloudPullStore = CloudPullStore(database, this)
-    val cloudUploads: CloudUploadStore = CloudUploadStore(database, cloud, driver, replicas, cloudPulls, settings)
+    val cloudUploads: CloudUploadStore = CloudUploadStore(database, cloud, driver, replicas, cloudPulls, settings, nowMs)
     val accountIdentities: AccountIdentityRepository = AccountIdentityRepository(database, this)
     private val identityListeners = mutableSetOf<() -> Unit>()
 
@@ -288,6 +291,15 @@ class LocalData(
         return true
     }
 
+    /**
+     * Konto hinter dem lokalen Spieler [id] im aktuellen Konto: als Freund eingetragen oder als eigener Gast einem Freund
+     * zugeordnet (plan-0.6.3 §3.5). Zwei Plätze mit demselben Konto sind dieselbe Person.
+     */
+    fun linkedProfile(id: PlayerId): String? {
+        val account = accountIdentities.profile ?: return null
+        return players.friendProfile(account, id) ?: cloudPulls.assignedProfile(account, id.value)
+    }
+
     /** [id] ist der Besitzer selbst oder einer seiner Aliase. */
     fun isSelf(id: PlayerId): Boolean = id == players.self()?.id || id in selfAliases()
 
@@ -312,8 +324,9 @@ class LocalData(
         /**
          * Schema 14: kontogebundener Zugriff, Redaktionen, Eventbelege, Readiness-Marken, Spuren und Kopfstand eigener Matches;
          * Freunde als Mitspieler (lokale Spieler-ID je Konto) und Verknüpfungshinweise (P2-E); Schema 15: Puls und Schritte je
-         * Match und Quelle (`health_series`, Plan Puls H4); Schema 16: Pulsserien je Kontobereich (`health_series.scope_id`).
+         * Match und Quelle (`health_series`, Plan Puls H4); Schema 16: Pulsserien je Kontobereich (`health_series.scope_id`);
+         * Schema 17: zurückgestellte, vom Server endgültig abgelehnte Uploads (`cloud_upload_hold`, Plan 0.6.3 §3.2).
          */
-        const val SCHEMA_VERSION: Long = 16
+        const val SCHEMA_VERSION: Long = 17
     }
 }

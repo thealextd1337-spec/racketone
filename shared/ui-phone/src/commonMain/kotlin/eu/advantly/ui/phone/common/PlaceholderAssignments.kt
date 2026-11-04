@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import eu.advantly.core.model.MatchId
 import eu.advantly.core.model.PlayerId
+import eu.advantly.presentation.friends.FriendEntry
 import eu.advantly.presentation.match.MatchHistoryPort
 import eu.advantly.presentation.match.MatchSetup
 import eu.advantly.presentation.match.PlayerAssignmentFailure
@@ -38,10 +39,14 @@ import eu.advantly.ui.phone.resources.assign_new_player
 import eu.advantly.ui.phone.resources.assign_player
 import eu.advantly.ui.phone.resources.assign_player_name
 import eu.advantly.ui.phone.resources.assign_remove
+import eu.advantly.ui.phone.resources.wizard_friends_title
 import org.jetbrains.compose.resources.StringResource
 import org.jetbrains.compose.resources.stringResource
 
-/** Dieselbe Personenwahl in Live-Ansicht und Ergebnis; keine Zählrechte erforderlich. */
+/**
+ * Dieselbe Personenwahl in Live-Ansicht und Ergebnis; keine Zählrechte erforderlich. Neben Mitspielern und Gästen stehen
+ * „Du“ und Freunde mit Konto ([friends], wie im Assistenten) zur Wahl (plan-0.6.3 §3.4); belegte Personen nie.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlaceholderAssignments(
@@ -49,6 +54,7 @@ fun PlaceholderAssignments(
     setup: MatchSetup,
     history: MatchHistoryPort,
     players: PlayersPort,
+    friends: List<FriendEntry> = emptyList(),
 ) {
     if (!history.canAssignPlayer(matchId)) return
     val slots =
@@ -80,11 +86,19 @@ fun PlaceholderAssignments(
     var name by remember(slot) { mutableStateOf("") }
     var failure by remember(slot) { mutableStateOf<StringResource?>(null) }
     val occupied = (setup.lineup.a + setup.lineup.b).map { setup.assignedPlayers[it]?.id ?: it }.toSet()
+    val self = players.self.value.id
+    // Der eigene Spieler sitzt auch über einen Alias (z. B. alter Uhr-Self); dann nicht noch einmal anbieten.
+    val selfSeated = occupied.any { it == self || it in LocalSelfAliases.current }
+    // Auch über Gast-Zuordnung: Sitzt Test1 (verknüpft mit Anja), ist Anja belegt.
+    val seatedFriends = remember(occupied) { occupied.mapNotNull(players::linkedProfile).toSet() }
+    val offeredFriends = friends.filter { !it.alias.isNullOrBlank() && it.profileId !in seatedFriends }
+    val offeredIds = offeredFriends.mapTo(HashSet()) { it.profileId }
     val choices =
         (players.recentPlayers(setup.sport) + guests + players.self.value)
             .distinctBy { it.id }
-            .filterNot { it.id in occupied || it.isPlaceholder }
-            .filter { it.displayName.isNotBlank() }
+            .filterNot { it.id in occupied || it.isPlaceholder || (it.id == self && selfSeated) }
+            // „Du“ hat lokal keinen Namen; Freunde stehen unten mit ihrem aktuellen Alias.
+            .filter { (it.displayName.isNotBlank() || it.id == self) && players.linkedProfile(it.id) !in offeredIds }
 
     fun assign(id: PlayerId?) {
         if (history.assignPlayer(matchId, slot, id)) {
@@ -140,12 +154,23 @@ fun PlaceholderAssignments(
                 modifier = Modifier.fillMaxWidth().testTag("assign_create"),
             ) { Text(stringResource(Res.string.assign_new_player)) }
             failure?.let { Text(stringResource(it)) }
-            choices.filter { it.displayName.contains(name, ignoreCase = true) }.forEach { person ->
+            choices.map { it to playerName(it) }.filter { it.second.contains(name, ignoreCase = true) }.forEach { (person, label) ->
                 TextButton(
                     onClick = { assign(person.id) },
                     modifier = Modifier.fillMaxWidth().testTag("assign_person_${person.id.value}"),
                 ) {
-                    Text(person.displayName)
+                    Text(label)
+                }
+            }
+            val matching = offeredFriends.filter { it.alias.orEmpty().contains(name, ignoreCase = true) }
+            if (matching.isNotEmpty()) SectionTitle(stringResource(Res.string.wizard_friends_title))
+            matching.forEach { friend ->
+                TextButton(
+                    // Lokale Spieler-ID wie im Assistenten; der Upload verknüpft den Platz über die Kontozuordnung.
+                    onClick = { players.addFriend(friend.profileId, friend.alias.orEmpty())?.let { assign(it.id) } },
+                    modifier = Modifier.fillMaxWidth().testTag("assign_friend_${friend.profileId}"),
+                ) {
+                    Text(friend.alias.orEmpty())
                 }
             }
         }

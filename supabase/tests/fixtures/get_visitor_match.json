@@ -20,12 +20,14 @@
     {
       "name": "Alice",
       "team": "A",
-      "position": 1
+      "position": 1,
+      "deletedProfile": false
     },
     {
       "name": "Max",
       "team": "B",
-      "position": 1
+      "position": 1,
+      "deletedProfile": false
     }
   ],
   "result": null,

@@ -47,4 +47,7 @@
     <string name="live_relay_channel_description">Solange deine Uhr zählt und andere live zusehen</string>
     <string name="live_relay_title">Live-Stand wird übertragen</string>
     <string name="live_relay_text">Deine Uhr zählt – Mitspieler und Zuschauer sehen den Stand live.</string>
+    <!-- Uhr-Zuschauen (0.6.3): unbenannte bzw. redigierte Plätze, vom Handy lokalisiert -->
+    <string name="player_slot_n">Spieler %1$d</string>
+    <string name="player_deleted">Gelöschter Spieler</string>
 </resources>

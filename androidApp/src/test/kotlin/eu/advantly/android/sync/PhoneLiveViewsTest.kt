@@ -8,6 +8,7 @@ import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.device.link.LiveViewsProvider
 import eu.advantly.match.session.PeerInfo
+import eu.advantly.presentation.match.CloudPlayerName
 import eu.advantly.sync.protocol.CompatibilityStatus
 import eu.advantly.sync.protocol.LiveRelation
 import eu.advantly.sync.protocol.LiveView
@@ -153,7 +154,7 @@ class PhoneLiveViewsTest {
     fun accountProviderMapsTheSanitizedProjectionOncePerCall() {
         val port = Port { listOf(live("player"), live("visitor"), live("future"), live("scorer", sport = "squash")) }
         val now = Instant.parse("2026-11-02T20:00:12Z").toEpochMilliseconds()
-        val views = runBlocking { AccountLiveViews(port, { "jonas" }, { now }).current() }
+        val views = runBlocking { AccountLiveViews(port, { "jonas" }, ::testLabel, { now }).current() }
 
         assertEquals(listOf("jonas"), port.profiles)
         assertEquals(listOf(LiveRelation.PLAYER, LiveRelation.VISITOR), views.map { it.relation })
@@ -171,13 +172,31 @@ class PhoneLiveViewsTest {
         assertFalse(bytes.decodeToString().contains("heartRate"))
     }
 
+    /** plan-0.6.3 §3.1/§3.6: Die Uhr bekommt „Spieler N“ und „Gelöschter Spieler“ fertig lokalisiert vom Handy. */
+    @Test
+    fun unnamedAndDeletedPlacesReachTheWatchLocalized() {
+        val doubles =
+            live("player").copy(
+                discipline = "doubles",
+                participants =
+                    listOf(
+                        VisitorTeamMember("A", 1, "Alex"),
+                        VisitorTeamMember("A", 2, "?"),
+                        VisitorTeamMember("B", 1, "Gelöschter Spieler"),
+                        VisitorTeamMember("B", 2, ""),
+                    ),
+            )
+        val view = runBlocking { AccountLiveViews(Port { listOf(doubles) }, { "jonas" }, ::testLabel).current() }.single()
+        assertEquals("Alex / Player 2" to "Deleted player / Player 4", view.teamA to view.teamB)
+    }
+
     @Test
     fun accountProviderIsEmptyWithoutAccountAndThrowsOnFailure() {
         val port = Port { error("offline") }
-        assertEquals(emptyList<LiveView>(), runBlocking { AccountLiveViews(port, { null }).current() })
+        assertEquals(emptyList<LiveView>(), runBlocking { AccountLiveViews(port, { null }, ::testLabel).current() })
         assertTrue(port.profiles.isEmpty())
-        assertTrue(runCatching { runBlocking { AccountLiveViews(port, { "jonas" }).current() } }.isFailure)
-        assertFalse(respond(AccountLiveViews(port, { "jonas" })))
+        assertTrue(runCatching { runBlocking { AccountLiveViews(port, { "jonas" }, ::testLabel).current() } }.isFailure)
+        assertFalse(respond(AccountLiveViews(port, { "jonas" }, ::testLabel)))
     }
 
     /**
@@ -189,14 +208,21 @@ class PhoneLiveViewsTest {
         val port = Port { listOf(live("player")) }
         var profile: String? = null
         var checks = 0
-        val cold = AccountLiveViews(port, { profile }, awaitAccount = { checks++.also { profile = "jonas" } })
+        val cold = AccountLiveViews(port, { profile }, ::testLabel, awaitAccount = { checks++.also { profile = "jonas" } })
         assertEquals(1, runBlocking { cold.current() }.size)
         runBlocking { cold.current() }
         assertEquals("geprüfte Sitzung: keine zweite Prüfung", 1, checks)
         assertEquals(listOf("jonas", "jonas"), port.profiles)
 
-        assertFalse(respond(AccountLiveViews(port, { null }, awaitAccount = { error("offline") })))
-        assertTrue(respond(AccountLiveViews(port, { null }, awaitAccount = {})))
+        assertFalse(respond(AccountLiveViews(port, { null }, ::testLabel, awaitAccount = { error("offline") })))
+        assertTrue(respond(AccountLiveViews(port, { null }, ::testLabel, awaitAccount = {})))
         assertEquals(emptyList<LiveView>(), LiveViewsCodec.decode(sent.single().third)?.matches)
     }
 }
+
+private fun testLabel(name: CloudPlayerName): String =
+    when (name) {
+        is CloudPlayerName.Named -> name.name
+        is CloudPlayerName.Slot -> "Player ${name.number}"
+        CloudPlayerName.Deleted -> "Deleted player"
+    }

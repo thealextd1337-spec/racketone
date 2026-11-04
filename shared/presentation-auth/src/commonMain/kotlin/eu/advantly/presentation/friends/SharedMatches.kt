@@ -1,8 +1,11 @@
 package eu.advantly.presentation.friends
 
 import eu.advantly.cloud.sync.PulledMatch
+import eu.advantly.cloud.sync.pulledPlayer
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.data.LocalData
+import eu.advantly.data.PlayerKind
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -24,7 +27,38 @@ interface SharedMatchesLocal {
         profileId: String,
         matchId: String,
     ): Map<String, String>
+
+    /** Eigene Gäste mit Server-Stand (Gast-ID → Verknüpfung, plan-0.6.3 §3.5); Gäste ohne gezogenen Stand fehlen. */
+    fun guestLinks(profileId: String): Map<String, GuestLink> = emptyMap()
 }
+
+/** Eigener Gast laut Pull: [friendId] verknüpftes Freundeskonto; [redacted] (z. B. Freund gelöscht): nicht mehr verknüpfbar. */
+data class GuestLink(
+    val friendId: String? = null,
+    val redacted: Boolean = false,
+)
+
+/**
+ * Eigene Gäste, die der Server kennt (Gast-ID → [GuestLink]). Redigiert heißt: im Pull gelöscht oder laut
+ * Redaktionsmanifest gesperrt (Freund gelöscht); nie über den Namen, ein Gast darf „Gelöschter Spieler“ heißen.
+ */
+fun LocalData.ownGuestLinks(profileId: String): Map<String, GuestLink> =
+    players
+        .all()
+        .filter { it.kind == PlayerKind.GUEST }
+        .mapNotNull { guest ->
+            cloudPulls.pulledPlayer(profileId, guest.id.value)?.takeIf { it.owned }?.let {
+                val redacted = it.deleted || players.isRedacted(guest.id)
+                guest.id.value to GuestLink(it.profileId.takeUnless { redacted }, redacted)
+            }
+        }.toMap()
+
+/** Hinweis nach „Mit Freund verknüpfen“: [matches] zugeordnete Matches. */
+data class GuestLinked(
+    val playerId: String,
+    val friendId: String,
+    val matches: Int,
+)
 
 /**
  * Geteiltes Match eines Freundes (Feed, L13): ausschließlich anzeigbare Felder der bereinigten Sicht – keine Profil-,
@@ -41,12 +75,25 @@ data class FeedMatch(
     val resultReason: String?,
     val startedAt: String?,
     val endedAt: String?,
-    val teamA: List<String>,
-    val teamB: List<String>,
+    val teamA: List<CloudSlot>,
+    val teamB: List<CloudSlot>,
     /** Satzstände (A, B), soweit die bereinigte Projektion sie enthält. */
     val sets: List<Pair<Int, Int>>,
     /** Ergebnis nach dem Spiel von Hand korrigiert (`summary.corrected`, 0.3.0). */
     val corrected: Boolean = false,
+)
+
+/**
+ * Platz in einer Cloud-Ansicht, roh wie vom Server: Die UI macht daraus Namen, „Spieler N“ oder „Gelöschter Spieler“
+ * (`cloudPlayerName` in presentation, plan-0.6.3 §3.1/§3.6). [linked]/[deleted] fehlen in `visitor_view` (immer `false`).
+ */
+data class CloudSlot(
+    val name: String,
+    val team: String,
+    val position: Int,
+    val linked: Boolean = false,
+    /** `deletedProfile` des Servers; `null`: nicht geliefert (ältere Server), dann entscheidet der Name. */
+    val deleted: Boolean? = null,
 )
 
 /** Eigene Sicht auf ein Match im Detail; ohne Konto, vor dem Hochladen oder ohne eigenen Platz ohne Aktionen. */
@@ -65,10 +112,15 @@ data class MatchSharing(
     val gone: Boolean = false,
     /** Server-Hinweise je Platz (Slot-ID → Grund) zur zuletzt hochgeladenen Besetzung. */
     val linkNotes: Map<String, String> = emptyMap(),
+    /** Ein Freund hat mir seinen Gast zugeordnet (`assigned`): „Das war ich nicht“ für alle Matches dieses Gasts. */
+    val canRejectAssignment: Boolean = false,
 )
 
 internal fun PulledMatch.toFeed(): FeedMatch {
-    fun team(name: String) = participants.filter { it.team == name }.sortedBy { it.position }.map { it.displayName }
+    fun team(name: String) =
+        participants.filter { it.team == name }.sortedBy { it.position }.map {
+            CloudSlot(it.displayName, it.team, it.position, it.profileId != null || it.linkStatus != null, it.deletedProfile)
+        }
     // Feed: bereinigt als [[a,b],…]; Mitglieder bekommen die rohe Client-Summary mit Objekten {a,b,…}. Grenzen wie der
     // Server (höchstens 9 Sätze, 0..99, ein ungültiger Satz verwirft alle).
     val parsed =

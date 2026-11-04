@@ -253,4 +253,50 @@ class CloudUploadStoreTest {
         }
         assertEquals(1, data.cloud.pendingCount())
     }
+
+    /** Plan 0.6.3 §3.2: Zurückgestellt bleibt nur dasselbe Konto innerhalb von 24 h; Events werden nie gelöscht. */
+    @Test
+    fun heldMatchIsSkippedUntilAccountSwitchManualReleaseOrDayPassed() {
+        var now = 1_000_000L
+        val data = LocalData(createTestDriver()) { now }
+        data.events.appendAll(listOf(event("a", match = "held"), event("b", seq = 2, match = "other")))
+
+        fun selected(session: CloudUploadSession) =
+            data.cloudUploads
+                .capture(session, 10)
+                .events
+                .map { it.id }
+
+        fun hold(session: CloudUploadSession) {
+            val snapshot = data.cloudUploads.capture(session, 10)
+            data.cloudUploads.acknowledge(snapshot, emptySet(), held = setOf("held"))
+        }
+        var alice = data.cloudUploads.activate("alice").also { data.cloudUploads.bindOwnedDevices(it, setOf("phone")) }
+        val first = data.cloudUploads.capture(alice, 10)
+        assertFailsWith<IllegalArgumentException> { data.cloudUploads.acknowledge(first, emptySet(), held = setOf("unknown")) }
+        data.cloudUploads.acknowledge(first, setOf("b"), held = setOf("held"))
+        assertEquals(emptyList(), selected(alice))
+        assertEquals(1, data.cloud.pendingCount(), "Events des zurückgestellten Matches bleiben ausstehend")
+        assertEquals(1L, data.cloudUploads.inventory(alice).pendingEvents)
+
+        alice = data.cloudUploads.activate("alice")
+        assertEquals(emptyList(), selected(alice), "Neue Sitzung desselben Kontos gibt nicht frei")
+        data.cloudUploads.activate("bob")
+        alice = data.cloudUploads.activate("alice")
+        assertEquals(listOf("a"), selected(alice), "Kontowechsel gibt frei")
+
+        hold(alice)
+        data.cloudUploads.releaseHolds(alice)
+        assertEquals(listOf("a"), selected(alice), "Manueller Abgleich gibt frei")
+
+        hold(alice)
+        now += 24 * 60 * 60 * 1000L - 1
+        assertEquals(emptyList(), selected(alice))
+        now += 1
+        assertEquals(listOf("a"), selected(alice), "Nach 24 h wieder zugelassen")
+
+        hold(alice)
+        now -= 1
+        assertEquals(listOf("a"), selected(alice), "Zurückgestellte Uhr verlängert nicht")
+    }
 }

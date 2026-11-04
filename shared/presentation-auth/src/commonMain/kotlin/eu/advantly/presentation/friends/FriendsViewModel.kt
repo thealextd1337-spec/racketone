@@ -8,6 +8,7 @@ import eu.advantly.cloud.sync.ConsentStatus
 import eu.advantly.cloud.sync.FoundProfile
 import eu.advantly.cloud.sync.FriendRequestResult
 import eu.advantly.cloud.sync.FriendsPort
+import eu.advantly.cloud.sync.GuestLinksPort
 import eu.advantly.cloud.sync.LiveMatchesPort
 import eu.advantly.cloud.sync.PulledFriendship
 import eu.advantly.cloud.sync.PulledMatch
@@ -70,6 +71,12 @@ data class FriendsState(
     val handovers: Map<String, HandoverStatus> = emptyMap(),
     /** Fehler der letzten Übergabe-Aktion (Einladen, Annehmen, Ablehnen, Übernehmen). */
     val handoverError: String? = null,
+    /** Eigene Gäste mit Server-Stand (plan-0.6.3 §3.5); nur sie lassen sich mit einem Freund verknüpfen. */
+    val guestLinks: Map<String, GuestLink> = emptyMap(),
+    /** Hinweis nach erfolgreichem Verknüpfen, bis zum Wegklicken. */
+    val guestLinked: GuestLinked? = null,
+    /** Fehler der letzten Gast-Aktion (Verknüpfen, Lösen). */
+    val guestError: String? = null,
 )
 
 /**
@@ -93,6 +100,8 @@ class FriendsViewModel(
     private val liveMatches: LiveMatchesPort? = null,
     /** Zählen weitergeben (plan-live-mitspieler §3.4); ohne bleibt es aus (iOS, kein Konto-Host). */
     private val scorers: ScorerHandovers? = null,
+    /** Gast mit Freund verknüpfen (plan-0.6.3 §3.5); ohne Port bleibt es aus. */
+    private val guests: GuestLinksPort? = null,
 ) {
     private val scope = CoroutineScope(parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]))
     private val mutable = MutableStateFlow(FriendsState())
@@ -109,6 +118,9 @@ class FriendsViewModel(
     private var openedMatch: String? = null
     private val shareOverlay = mutableMapOf<String, Boolean>()
     private val goneMatches = mutableSetOf<String>()
+
+    /** Bestätigte Gast-Verknüpfungen bis zum nächsten vollständigen Pull. */
+    private val guestOverlay = mutableMapOf<String, GuestLink>()
 
     /** Match der Zuschauer-Verwaltung; Zähler verwirft „Ich schaue zu“-Antworten, die vor einem Beenden begannen. */
     private var visitorMatch: String? = null
@@ -243,9 +255,55 @@ class FriendsViewModel(
                 it
         }
 
+    /** Eigenen Gast [playerId] mit Freund [friendId] verknüpfen (Rückfrage liegt in der UI). */
+    fun linkGuest(
+        playerId: String,
+        friendId: String,
+    ) {
+        val port = guests ?: return
+        val link = mutable.value.guestLinks[playerId] ?: return
+        if (link.friendId != null || link.redacted) return
+        run(ErrorSlot.GUEST) { session ->
+            val count = port.assignGuest(session.profileId, playerId, friendId)
+            current(session)
+            guestOverlay[playerId] = GuestLink(friendId)
+            show { copy(guestLinked = GuestLinked(playerId, friendId, count)) }
+            afterChange()
+        }
+    }
+
+    fun unlinkGuest(playerId: String) {
+        val port = guests ?: return
+        if (mutable.value.guestLinks[playerId]?.friendId == null) return
+        run(ErrorSlot.GUEST) { session ->
+            port.unassignGuest(session.profileId, playerId)
+            current(session)
+            guestOverlay[playerId] = GuestLink()
+            afterChange()
+        }
+    }
+
+    fun dismissGuestLinked() = show { copy(guestLinked = null) }
+
+    /** „Das war ich nicht“ zu einem mir zugeordneten Gast: löst alle seine Matches und sperrt die Zuordnung. */
+    fun rejectAssignment() {
+        val port = guests ?: return
+        val id =
+            mutable.value.match
+                ?.takeIf { it.canRejectAssignment }
+                ?.matchId ?: return
+        val player = readyProfile()?.let { assignedGuest(it, id) } ?: return
+        run { session ->
+            port.rejectGuestAssignment(session.profileId, player)
+            current(session)
+            goneMatches += id
+            afterChange()
+        }
+    }
+
     fun loadShareDefault() {
         val port = matches ?: return
-        run(shareDefault = true) { session ->
+        run(ErrorSlot.SHARE_DEFAULT) { session ->
             val share = port.shareMatchesDefault(session.profileId)
             current(session)
             show { copy(shareDefault = share) }
@@ -255,7 +313,7 @@ class FriendsViewModel(
     /** Standard für eigene neue Matches; gilt beim Hochladen eines Matches, bestehende bleiben unverändert. */
     fun setShareDefault(share: Boolean) {
         val port = matches ?: return
-        run(shareDefault = true) { session ->
+        run(ErrorSlot.SHARE_DEFAULT) { session ->
             port.setShareMatchesDefault(session.profileId, share)
             current(session)
             show { copy(shareDefault = share) }
@@ -263,7 +321,7 @@ class FriendsViewModel(
     }
 
     fun dismissError() {
-        mutable.value = mutable.value.copy(error = null, shareDefaultError = null)
+        mutable.value = mutable.value.copy(error = null, shareDefaultError = null, guestError = null)
     }
 
     /** Zuschauer-Verwaltung für [matchId] öffnen (lädt die Liste) bzw. schließen (`null`). */
@@ -604,6 +662,7 @@ class FriendsViewModel(
             overlay.clear()
             shareOverlay.clear()
             goneMatches.clear()
+            guestOverlay.clear()
             pullAgain = false
             watchingRevision++
             mutable.value = FriendsState(access = access)
@@ -629,6 +688,7 @@ class FriendsViewModel(
             overlay.clear()
             shareOverlay.clear()
             goneMatches.clear()
+            guestOverlay.clear()
         }
         reloadLocal()
         // Gerätebindung entsteht im Pull: einen fehlenden (z. B. daran gescheiterten) Code jetzt nachladen.
@@ -672,6 +732,12 @@ class FriendsViewModel(
                 match = profile?.let { sharing(it) },
                 handovers = profile?.let { scorers?.statuses(it) }.orEmpty(),
                 live = profile?.let { p -> mutable.value.live?.let { withRoles(p, it) } } ?: mutable.value.live,
+                // Redigiert schlägt jede noch nicht gezogene Bestätigung (plan-0.6.3 §3.6).
+                guestLinks =
+                    profile
+                        ?.let { local?.guestLinks(it) }
+                        .orEmpty()
+                        .mapValues { (id, link) -> guestOverlay[id]?.takeUnless { link.redacted } ?: link },
             )
     }
 
@@ -686,8 +752,20 @@ class FriendsViewModel(
             canReject = mine?.linkStatus == "linked",
             canHide = mine?.linkStatus in setOf("linked", "assigned", "confirmed"),
             linkNotes = source.linkNotes(profileId, id),
+            canRejectAssignment = guests != null && assignedGuest(profileId, id) != null,
         )
     }
+
+    /** Gast-ID meines `assigned`-Platzes in [matchId] (ein Freund hat mir seinen Gast zugeordnet), sonst `null`. */
+    private fun assignedGuest(
+        profileId: String,
+        matchId: String,
+    ): String? =
+        local
+            ?.match(profileId, matchId)
+            ?.participants
+            ?.firstOrNull { it.profileId == profileId && it.linkStatus == "assigned" }
+            ?.playerId
 
     /** Erst nach [current] die Überlagerung setzen: eine verspätete Antwort darf kein anderes Konto verändern. */
     private fun matchAction(
@@ -739,15 +817,17 @@ class FriendsViewModel(
         mutable.value = mutable.value.update()
     }
 
-    /** [shareDefault]: Fehler gehört zum Standardwert-Schalter, nicht zum Freunde-Tab. */
+    /** Wohin ein Fehler gehört: Freunde-Tab, Standardwert-Schalter oder Gästeliste. */
+    private enum class ErrorSlot { TAB, SHARE_DEFAULT, GUEST }
+
     private fun run(
-        shareDefault: Boolean = false,
+        slot: ErrorSlot = ErrorSlot.TAB,
         block: suspend (CloudSession) -> Unit,
     ) {
         val session = shown ?: return
         if (mutable.value.busy || mutable.value.access != FriendsAccess.READY) return
         val started = epoch
-        mutable.value = mutable.value.copy(busy = true, error = null, shareDefaultError = null)
+        mutable.value = mutable.value.copy(busy = true, error = null, shareDefaultError = null, guestError = null)
         action =
             scope.launch {
                 try {
@@ -763,7 +843,11 @@ class FriendsViewModel(
                     if (started == epoch) {
                         val reason = (e as? CloudException)?.reason ?: "connection_failed"
                         mutable.value =
-                            if (shareDefault) mutable.value.copy(shareDefaultError = reason) else mutable.value.copy(error = reason)
+                            when (slot) {
+                                ErrorSlot.TAB -> mutable.value.copy(error = reason)
+                                ErrorSlot.SHARE_DEFAULT -> mutable.value.copy(shareDefaultError = reason)
+                                ErrorSlot.GUEST -> mutable.value.copy(guestError = reason)
+                            }
                         // Fehlende Bindung holt der Pull-Host nach; danach lädt [onPull] den Code erneut.
                         if (reason == "device_not_authorized") pull?.pullNow()
                     }

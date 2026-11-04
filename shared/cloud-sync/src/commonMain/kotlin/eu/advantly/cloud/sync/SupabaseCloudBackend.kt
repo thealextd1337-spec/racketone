@@ -46,7 +46,8 @@ class SupabaseCloudBackend internal constructor(
     VisitorsPort,
     LiveMatchesPort,
     PushTokenPort,
-    ScorerRolesPort {
+    ScorerRolesPort,
+    GuestLinksPort {
     private var binding: CloudDeviceBinding? = null
     private var bindingAttempt = 0L
 
@@ -147,6 +148,8 @@ class SupabaseCloudBackend internal constructor(
         return captureUpload(limit)
     }
 
+    override fun releaseUploadHolds() = sessions.releaseUploadHolds(sessions.capture())
+
     override fun uploadInventory(attempt: CloudUploadAttempt) = readUploadStatus(attempt).inventory
 
     override fun readUploadStatus(attempt: CloudUploadAttempt?): CloudUploadStatus {
@@ -187,7 +190,15 @@ class SupabaseCloudBackend internal constructor(
                 throw CloudException("cloud_response_invalid", false)
             }
         val update = OutboxPlanner.evaluate(sent, response)
-        sessions.acknowledge(attempt.lease, attempt.snapshot, update.uploaded, update.rejected, metadata, linkNotes(metadata, response))
+        sessions.acknowledge(
+            attempt.lease,
+            attempt.snapshot,
+            update.uploaded,
+            update.rejected,
+            metadata,
+            linkNotes(metadata, response),
+            update.held,
+        )
         return response
     }
 
@@ -498,6 +509,38 @@ class SupabaseCloudBackend internal constructor(
         val stored =
             shareDefault(ownRow("profile_settings", lease(profileId), body) { "profile_id=eq.$profileId&select=share_matches_default" })
         if (stored != share) throw CloudException("cloud_response_invalid", false)
+    }
+
+    override suspend fun assignGuest(
+        profileId: String,
+        playerId: String,
+        friendId: String,
+    ): Int {
+        require(playerId.isNotBlank() && friendId.isNotBlank())
+        val body =
+            buildJsonObject {
+                put("p_player_id", playerId)
+                put("p_profile_id", friendId)
+            }
+        return decode<Int>(rpc(lease(profileId), "assign_player", body)).also {
+            if (it < 0) throw CloudException("cloud_response_invalid", false)
+        }
+    }
+
+    override suspend fun unassignGuest(
+        profileId: String,
+        playerId: String,
+    ) {
+        require(playerId.isNotBlank())
+        rpc(lease(profileId), "unassign_player", buildJsonObject { put("p_player_id", playerId) })
+    }
+
+    override suspend fun rejectGuestAssignment(
+        profileId: String,
+        playerId: String,
+    ) {
+        require(playerId.isNotBlank())
+        rpc(lease(profileId), "reject_player_assignment", buildJsonObject { put("p_player_id", playerId) })
     }
 
     override suspend fun addVisitor(

@@ -109,6 +109,19 @@ internal class PhoneUploadHost(
         start()
     }
 
+    /** Manueller Abgleich (Plan 0.6.3 §3.2): vom Server endgültig abgelehnte Matches beim nächsten Upload erneut versuchen. */
+    internal fun releaseHolds() {
+        confined()
+        if (closed || synchronize() == null) return
+        storageAction {
+            try {
+                uploads.releaseUploadHolds()
+            } catch (_: CloudException) {
+                // Ohne bereite Sitzung bleibt es bei der Zurückstellung; der Lauf meldet den Grund selbst.
+            }
+        }
+    }
+
     /** Startet einen Upload oder liefert die laufende Aktion (auch [refreshStatus]); `null` ohne gültigen Kontext. */
     internal fun start(): Job? {
         confined()

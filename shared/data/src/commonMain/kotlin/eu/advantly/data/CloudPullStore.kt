@@ -1,8 +1,10 @@
 package eu.advantly.data
 
 import eu.advantly.data.db.AdvantlyDatabase
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.jsonObject
 
 /** D1-Persistenz auf demselben seriellen Kontext wie LocalData. Alle Commits verlangen einen synchronen Fence. */
@@ -154,6 +156,48 @@ class CloudPullStore internal constructor(
         val json = snapshot(profileId, CloudPullEntityKind.MATCH, matchId)?.json ?: return null
         val createdBy = runCatching { (DataJson.parseToJsonElement(json) as? JsonObject)?.get("createdBy") as? JsonPrimitive }.getOrNull()
         return createdBy?.takeIf { it.isString }?.content
+    }
+
+    /**
+     * Freundeskonto, dem der eigene Gast [playerId] laut Pull zugeordnet ist (`assign_player`, plan-0.6.3 §3.5); ohne
+     * Snapshot, fremd oder redigiert `null`.
+     */
+    fun assignedProfile(
+        profileId: String,
+        playerId: String,
+    ): String? {
+        val json = snapshot(profileId, CloudPullEntityKind.PLAYER, playerId)?.json ?: return null
+        val player = runCatching { DataJson.parseToJsonElement(json) as? JsonObject }.getOrNull() ?: return null
+
+        fun flag(name: String) = (player[name] as? JsonPrimitive)?.booleanOrNull == true
+        if (!flag("owned") || flag("deleted")) return null
+        return (player["profileId"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    }
+
+    /**
+     * Plätze des gezogenen Matches [matchId], die der Server per Gast-Zuordnung (`assign_player`, plan-0.6.3 §3.5) mit
+     * einem Freundeskonto verknüpft hat: Spieler-ID → Konto. Übersprungene (Freund schon im Match), abgelehnte und
+     * gelöschte Plätze fehlen; nur zur Anzeige des Freundesnamens.
+     */
+    fun assignedParticipants(
+        profileId: String,
+        matchId: String,
+    ): Map<String, String> {
+        val json = snapshot(profileId, CloudPullEntityKind.MATCH, matchId)?.json ?: return emptyMap()
+        val participants =
+            runCatching { (DataJson.parseToJsonElement(json) as? JsonObject)?.get("participants") as? JsonArray }.getOrNull()
+                ?: return emptyMap()
+        return participants
+            .mapNotNull { element ->
+                val participant = element as? JsonObject ?: return@mapNotNull null
+
+                fun text(name: String) = (participant[name] as? JsonPrimitive)?.takeIf { it.isString }?.content
+                val linked = text("linkStatus") in setOf("assigned", "confirmed")
+                val deleted = (participant["deletedProfile"] as? JsonPrimitive)?.booleanOrNull == true
+                val player = text("playerId")
+                val profile = text("profileId")
+                if (linked && !deleted && player != null && profile != null) player to profile else null
+            }.toMap()
     }
 
     /** false: Epoche wechselte hinter Cursor null; Antwort verwerfen und dauerhaft ab null neu beginnen. */

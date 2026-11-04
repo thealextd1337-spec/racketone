@@ -14,6 +14,7 @@ import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import eu.advantly.android.AdvantlyPhoneApplication
 import eu.advantly.android.BuildConfig
+import eu.advantly.android.R
 import eu.advantly.android.push.AndroidNotificationSettings
 import eu.advantly.android.push.AndroidPush
 import eu.advantly.android.push.AndroidPushPreferences
@@ -45,6 +46,8 @@ import eu.advantly.presentation.friends.FriendsViewModel
 import eu.advantly.presentation.friends.ScorerHandovers
 import eu.advantly.presentation.friends.SharedMatchesLocal
 import eu.advantly.presentation.friends.VisitorQueue
+import eu.advantly.presentation.friends.ownGuestLinks
+import eu.advantly.presentation.match.CloudPlayerName
 import eu.advantly.presentation.push.PushRegistration
 import eu.advantly.presentation.support.SupportViewModel
 import eu.advantly.sync.protocol.LiveView
@@ -111,6 +114,7 @@ internal fun ComponentActivity.createPhoneAccount(
                     core.visitors,
                     core.backend,
                     core.scorers,
+                    core.backend,
                 ),
             sync = core.sync,
             export = PhoneExportHost(core.auth.dataExports(), applicationContext, core.runtime.scope),
@@ -240,7 +244,7 @@ internal class PhoneAccountCore private constructor(
      * Zuschauer (F16): Benennungen warten, bis der Match-Kopf hochgeladen ist (oder das Match als Mitglied gezogen
      * wurde), und gehen nach jedem Abgleich hinaus.
      */
-    val visitors = VisitorQueue(record, backend, ::onServer) { sync.syncNow() }
+    val visitors = VisitorQueue(record, backend, ::onServer) { sync.request(null) }
 
     private fun onServer(
         profile: String,
@@ -251,7 +255,7 @@ internal class PhoneAccountCore private constructor(
         HandoverPoll(SystemClock::elapsedRealtime, { delayMs ->
             runtime.scope.launch {
                 delay(delayMs)
-                sync.syncNow()
+                sync.request(null)
             }
         })
 
@@ -276,7 +280,7 @@ internal class PhoneAccountCore private constructor(
             System::currentTimeMillis,
         ) {
             handoverPoll.restart()
-            sync.syncNow()
+            sync.request(null)
         }
 
     private suspend fun flushVisitors() {
@@ -332,6 +336,9 @@ internal class PhoneAccountCore private constructor(
                 profileId: String,
                 matchId: String,
             ) = guarded(emptyMap()) { cloudUploads.linkNotes(profileId, matchId) }
+
+            // Nur eigene Gäste, die der Server kennt; redigiert nach ausdrücklichem Status, nicht nach dem Namen.
+            override fun guestLinks(profileId: String) = guarded(emptyMap()) { ownGuestLinks(profileId) }
         }
 
     private fun <T> guarded(
@@ -351,7 +358,17 @@ internal class PhoneAccountCore private constructor(
      * sie eine Zeitüberschreitung des Abrufs übersteht und der nächste Abruf die Sitzung vorfindet.
      */
     val liveViews =
-        AccountLiveViews(backend, { auth.session.value?.profileId }) {
+        AccountLiveViews(
+            backend,
+            { auth.session.value?.profileId },
+            { name ->
+                when (name) {
+                    is CloudPlayerName.Named -> name.name
+                    is CloudPlayerName.Slot -> context.getString(R.string.player_slot_n, name.number)
+                    CloudPlayerName.Deleted -> context.getString(R.string.player_deleted)
+                }
+            },
+        ) {
             if (refreshAccount == null) runtime.scope.async { auth.refreshProfile() }.await()
         }
 

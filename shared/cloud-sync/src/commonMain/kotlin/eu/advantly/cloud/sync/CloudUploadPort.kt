@@ -15,6 +15,9 @@ interface CloudUploadPort {
         limit: Int = PushBatch.MAX_EVENTS_PER_PUSH,
     ): CloudUploadAttempt
 
+    /** Manueller Abgleich: vom Server endgültig abgelehnte Matches beim nächsten Upload erneut versuchen. */
+    fun releaseUploadHolds()
+
     /** Aktueller Restbestand derselben Sitzung; verändert einen aufbewahrten Retry-Versuch nicht. */
     fun uploadInventory(attempt: CloudUploadAttempt): CloudUploadInventory
 

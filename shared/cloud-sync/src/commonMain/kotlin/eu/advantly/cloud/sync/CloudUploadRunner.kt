@@ -99,13 +99,22 @@ class CloudUploadRunner(
                         val update = OutboxPlanner.evaluate(batch, response)
                         val acknowledged = current.snapshot.acknowledgedMetadata(batch, response)
                         val incomplete = update.retry.isNotEmpty() || acknowledged != current.snapshot.metadataRevisions
+                        val next = uploads.nextUpload(current, maxEventsPerBatch)
+                        // Gerade zurückgestellte Matches fallen aus der Auswahl (Plan 0.6.3 §3.2). Bleibt ohne sie ein
+                        // sendbarer Folge-Batch, geht es weiter, auch wenn dieser Batch selbst nichts bestätigt bekam.
+                        val proceeds =
+                            update.held.isNotEmpty() &&
+                                next.batch.let { following ->
+                                    (following.events.isNotEmpty() || following.matches.isNotEmpty() || following.players.isNotEmpty()) &&
+                                        following.events.none { it.matchId in update.held } &&
+                                        following.matches.none { it.id in update.held }
+                                }
                         // Ohne jeden Fortschritt und mit dauerhaft abgelehntem Match (dessen Events dann `unknown_match` bleiben)
                         // brächte dieselbe Auswahl dasselbe Ergebnis: nicht im Minutentakt wiederholen. Fehlende Antworten
                         // bleiben dagegen wiederholbar (PARTIAL).
                         val stuck =
-                            incomplete && update.uploaded.isEmpty() && update.rejected.isEmpty() && acknowledged.isEmpty() &&
+                            !proceeds && incomplete && update.uploaded.isEmpty() && update.rejected.isEmpty() && acknowledged.isEmpty() &&
                                 response.matches.any { it.result == "rejected" }
-                        val next = uploads.nextUpload(current, maxEventsPerBatch)
                         attempt = next
                         mutable.value =
                             mutable.value.copy(

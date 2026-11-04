@@ -53,6 +53,7 @@ import eu.advantly.ui.phone.app.rememberAdvantlyAppModel
 import eu.advantly.ui.phone.app.whatsNewPoints
 import eu.advantly.ui.phone.auth.AccountGate
 import eu.advantly.ui.phone.common.LocalArchivedPlayerIds
+import eu.advantly.ui.phone.common.LocalFriendAliases
 import eu.advantly.ui.phone.common.LocalSelfAliases
 import eu.advantly.ui.phone.common.LocalSelfId
 import eu.advantly.ui.phone.common.PlaceholderAssignments
@@ -203,7 +204,23 @@ fun AdvantlyApp(
             navigator.top == null &&
             openMatches.none { it.isRunning }
     BackHandler(enabled = showWhatsNew) { seeWhatsNew() }
+    val friendsState =
+        authModel
+            ?.friends
+            ?.state
+            ?.collectAsState()
+            ?.value
+    // Welcher Platz verknüpft ist, steht je Match im Setup (Pull); hier nur die Namen der Freunde.
+    val friendAliases =
+        remember(friendsState?.friends) {
+            friendsState
+                ?.friends
+                ?.mapNotNull { friend -> friend.alias?.takeIf { it.isNotBlank() }?.let { friend.profileId to it } }
+                ?.toMap()
+                .orEmpty()
+        }
     CompositionLocalProvider(
+        LocalFriendAliases provides friendAliases,
         LocalSelfId provides self.id,
         LocalSelfAliases provides aliases,
         LocalArchivedPlayerIds provides archived,
@@ -240,19 +257,12 @@ fun AdvantlyApp(
                         }
                     }
                 }
+                // Freunde nur mit nutzbarem Konto; sonst liefert das ViewModel eine leere Liste.
+                val friends = friendsState?.friends.orEmpty()
                 when (val top = navigator.top.takeUnless { accountRequired }) {
                     Overlay.Wizard -> {
                         Column(Modifier.fillMaxSize().safeContentPadding()) {
                             UpdateRequiredBanner(updateRequired)
-                            // Freunde nur mit nutzbarem Konto; sonst liefert das ViewModel eine leere Liste.
-                            val friends =
-                                authModel
-                                    ?.friends
-                                    ?.state
-                                    ?.collectAsState()
-                                    ?.value
-                                    ?.friends
-                                    .orEmpty()
                             // Zuschauer-Wahl lebt nur, solange der Assistent offen ist.
                             var visitors by remember { mutableStateOf(emptySet<String>()) }
                             var handover by remember { mutableStateOf<String?>(null) }
@@ -274,7 +284,7 @@ fun AdvantlyApp(
                         AdvantlyTheme(darkTheme = true) {
                             LiveScoreScreen(
                                 controller = model.controller,
-                                playerAssignments = { PlaceholderAssignments(it.matchId, it.setup, model.history, model.players) },
+                                playerAssignments = { PlaceholderAssignments(it.matchId, it.setup, model.history, model.players, friends) },
                                 debugTools = debugTools,
                                 onMinimize = { navigator.pop() },
                                 onShowResult = model::openResult,
@@ -316,6 +326,7 @@ fun AdvantlyApp(
                                     it.summary.setup,
                                     model.history,
                                     model.players,
+                                    friends,
                                 )
                             },
                             onBack = { navigator.pop() },

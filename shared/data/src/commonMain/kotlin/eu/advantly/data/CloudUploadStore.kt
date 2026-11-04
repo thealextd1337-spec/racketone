@@ -95,6 +95,7 @@ class CloudUploadStore internal constructor(
     private val replicas: ReplicaLifecycleStore,
     private val pulls: CloudPullStore,
     private val settings: SettingsRepository,
+    private val nowMs: () -> Long,
 ) {
     private val queries = database.cloudUploadQueries
     private var active: CloudUploadSession? = null
@@ -109,6 +110,8 @@ class CloudUploadStore internal constructor(
                 val session = CloudUploadSession(profileId, advanceGeneration())
                 // Jede Anmeldung bindet neu (K4-U: etwa nach der Freigabe dieses Handys).
                 cloud.resetDeviceRejections()
+                // Kontowechsel: Ablehnungen eines anderen Kontos stellen hier nichts mehr zurück (Plan 0.6.3 §3.2).
+                queries.releaseOtherProfileHolds(profileId)
                 cloud.resolvePlayerMetadataSources()
                 cloud.resolveOwnedMatchMetadataSources(profileId)
                 session
@@ -159,7 +162,8 @@ class CloudUploadStore internal constructor(
 
     /**
      * Begrenzte, deterministisch sortierte Auswahl; fremde und ungebundene Quellgeräte bleiben ausgeschlossen.
-     * Blockierte Matches (kein gültiger G/E-Beleg oder Neustart nach Pull offen) werden vor dem Limit übersprungen.
+     * Blockierte Matches (kein gültiger G/E-Beleg oder Neustart nach Pull offen) werden vor dem Limit übersprungen,
+     * ebenso zurückgestellte (vom Server endgültig abgelehnt, [acknowledge] mit `held`): Sie hielten sonst jeden Batch voll.
      */
     fun capture(
         session: CloudUploadSession,
@@ -180,6 +184,9 @@ class CloudUploadStore internal constructor(
                     context = proof.context,
                 ).also { requireActive(session) }
             }
+            val now = nowMs()
+            val held = queries.heldMatches(session.profileId, now - HOLD_MS, now).executeAsList().toSet()
+            val selectable = { matchId: String -> matchId !in held && proof.admits(matchId) }
             val events = mutableListOf<StoredEvent>()
             var afterMatch: String? = null
             while (events.size < limit) {
@@ -192,7 +199,7 @@ class CloudUploadStore internal constructor(
                         ) { id, match, device, seq, lamport, at, parent, type, payload, confirmed ->
                             StoredEvent(id, match, device, seq, lamport, payload, at, parent, type, confirmed == 1L)
                         }.executeAsList()
-                val blocked = page.firstOrNull { !proof.admits(it.matchId) }?.matchId
+                val blocked = page.firstOrNull { !selectable(it.matchId) }?.matchId
                 // shortcut: verwirft je blockiertem Match den Seitenrest (bis B × limit Zeilen); Keyset (match, lamport, device, id)
                 // einführen, sobald D1 Access-Zeilen schreibt und viele Matches blockiert sein können (Review r2 P3-2).
                 events += page.takeWhile { it.matchId != blocked }
@@ -204,7 +211,7 @@ class CloudUploadStore internal constructor(
             val players = mutableListOf<CloudRevisioned<CloudPlayer>>()
             val projections = mutableListOf<CloudRevisioned<CloudProjection>>()
             val selectedIds = events.mapTo(mutableSetOf()) { it.id }
-            pendingMetadata(session.profileId, selectedIds, limit, proof).forEach { row ->
+            pendingMetadata(session.profileId, selectedIds, limit, selectable).forEach { row ->
                 val version = row.version()
                 when (version.kind) {
                     CloudMetadataKind.HEADER -> {
@@ -254,12 +261,12 @@ class CloudUploadStore internal constructor(
         }
     }
 
-    /** Keyset-Seiten der Metadatenauswahl; Zeilen blockierter Matches zählen nicht zum Limit. */
+    /** Keyset-Seiten der Metadatenauswahl; Zeilen blockierter oder zurückgestellter Matches zählen nicht zum Limit. */
     private fun pendingMetadata(
         profileId: String,
         selectedIds: Set<String>,
         limit: Int,
-        proof: LifecycleProof,
+        selectable: (String) -> Boolean,
     ): List<Cloud_metadata> {
         val rows = mutableListOf<Cloud_metadata>()
         var after: Cloud_metadata? = null
@@ -269,7 +276,7 @@ class CloudUploadStore internal constructor(
                 database.cloudMetadataQueries
                     .pendingForProfile(profileId, selectedIds, after?.let(::rank), after?.entity_id.orEmpty(), requested.toLong())
                     .executeAsList()
-            rows += page.filter { it.kind == CloudMetadataKind.PLAYER.name || proof.admits(it.entity_id) }
+            rows += page.filter { it.kind == CloudMetadataKind.PLAYER.name || selectable(it.entity_id) }
             if (page.size < requested) break
             after = page.last()
         }
@@ -388,6 +395,15 @@ class CloudUploadStore internal constructor(
         }
     }
 
+    /** Manueller Abgleich: alle Zurückstellungen des Kontos aufheben, der nächste Upload versucht diese Matches erneut. */
+    fun releaseHolds(session: CloudUploadSession) {
+        requireOutsideTransaction()
+        database.transaction {
+            requireActive(session)
+            queries.releaseProfileHolds(session.profileId)
+        }
+    }
+
     /** Ausschließlich lesende skalare Aggregate; Herkunft und Revisionen entstehen an Schreib-/Bindungsstellen. */
     fun inventory(session: CloudUploadSession): CloudUploadInventory {
         requireOutsideTransaction()
@@ -419,6 +435,8 @@ class CloudUploadStore internal constructor(
      * Antwort an Sitzung UND Auswahl binden. Unbekannte IDs oder geänderte Events rollen den gesamten Ack zurück.
      * Zwischenzeitlich gelöschte Events werden übersprungen; weder sie noch ihre Match-Köpfe werden wieder angelegt.
      * Fehlende IDs bleiben ausstehend. Geräte-Acks werden niemals geändert.
+     * [held]: vom Server endgültig abgelehnte Matches; sie werden mit den gesendeten Revisionen von Kopf und Besetzung
+     * zurückgestellt (erneute Ablehnung startet die Frist neu), alle übrigen Matches der Auswahl freigegeben.
      */
     fun acknowledge(
         snapshot: CloudUploadSnapshot,
@@ -426,8 +444,10 @@ class CloudUploadStore internal constructor(
         rejected: Map<String, String> = emptyMap(),
         metadata: Set<CloudMetadataRevision> = emptySet(),
         linkNotes: Map<String, Map<String, String>> = emptyMap(),
+        held: Set<String> = emptySet(),
     ) {
         require(uploaded.intersect(rejected.keys).isEmpty())
+        require(held.all { it in snapshot.matchIds }) { "Antwort hält ein nicht ausgewähltes Match zurück" }
         require(linkNotes.keys.all { id -> metadata.any { it.kind == CloudMetadataKind.PARTICIPANTS && it.id == id } })
         require(rejected.values.all { it.isNotBlank() })
         val ids = uploaded + rejected.keys
@@ -459,6 +479,17 @@ class CloudUploadStore internal constructor(
                     database.friendPlayerQueries.putNotes(snapshot.profileId, matchId, DataJson.encodeToString(LINK_NOTES, notes))
                 }
             }
+            (snapshot.matchIds - held).forEach(queries::releaseHold)
+            val now = nowMs()
+            held.forEach { matchId ->
+                fun sent(kind: CloudMetadataKind) =
+                    snapshot.metadataRevisions.firstOrNull { it.kind == kind && it.id == matchId }?.revision
+                        ?: database.cloudMetadataQueries
+                            .byKey(kind.name, matchId)
+                            .executeAsOneOrNull()
+                            ?.revision ?: 0
+                queries.hold(matchId, snapshot.profileId, sent(CloudMetadataKind.HEADER), sent(CloudMetadataKind.PARTICIPANTS), now)
+            }
         }
     }
 
@@ -484,5 +515,8 @@ class CloudUploadStore internal constructor(
             ?.let { runCatching { DataJson.decodeFromString(LINK_NOTES, it) }.getOrNull() }
             .orEmpty()
 }
+
+/** Zurückstellung endgültig abgelehnter Matches: danach versucht der nächste reguläre Anlass sie erneut. */
+private const val HOLD_MS = 24 * 60 * 60 * 1000L
 
 private val LINK_NOTES = MapSerializer(String.serializer(), String.serializer())

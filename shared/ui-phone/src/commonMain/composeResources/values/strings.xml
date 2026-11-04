@@ -707,6 +707,9 @@
     <string name="whats_new_13_2">Please confirm the updated privacy policy (version 9) when asked – until then your matches are not backed up.</string>
     <string name="whats_new_15_1">Clearer watch icon: green now simply means everything fits – phone and watch are connected and run the same version.</string>
     <string name="whats_new_15_2">While your watch scores a match with friends, your phone shows “Sharing live score” – allow notifications for Advantly to see it.</string>
+    <string name="whats_new_16_1">Link a guest to a friend: in your profile under players, choose “Link with friend” – all matches with that guest go to your friend, who can object.</string>
+    <string name="whats_new_16_2">Assigning players afterwards now also offers your friends and yourself.</string>
+    <string name="whats_new_16_3">Unnamed places now show as “Player 1”, “Player 2” … in Live and for spectators, and uploads are more robust.</string>
     <string name="device_repair">Re-pair watches</string>
     <string name="device_repair_hint">Use this if a watch was lost or replaced. Every watch then has to confirm pairing again on the watch itself; its data stays.</string>
     <string name="device_repair_confirm_title">Re-pair all watches?</string>
@@ -1022,4 +1025,23 @@
     <string name="notifications_hint">Get notified when friends add you to a match or ask you to watch or keep score?</string>
     <string name="notifications_hint_enable">Turn on</string>
     <string name="notifications_hint_later">Not now</string>
+    <!-- Cloud-Ansichten (0.6.3): unbenannte bzw. redigierte Plätze -->
+    <string name="player_slot_n">Player %1$d</string>
+    <string name="player_deleted">Deleted player</string>
+    <!-- Gast mit Freund verknüpfen (0.6.3) -->
+    <string name="guest_link">Link to friend</string>
+    <string name="guest_link_choose">Which friend is %1$s?</string>
+    <string name="guest_link_no_friends">You have no friends with an account yet.</string>
+    <string name="guest_link_confirm_title">Link %1$s to %2$s?</string>
+    <string name="guest_link_confirm_text">All matches with %1$s will be assigned to %2$s. %2$s will be notified and can object.</string>
+    <string name="guest_link_confirm">Link</string>
+    <string name="guest_linked_to">linked to %1$s</string>
+    <string name="guest_unlink">Remove link</string>
+    <string name="guest_link_done">%1$s is now linked to %2$s. Matches assigned: %3$d</string>
+    <string name="guest_link_error_not_friend">You are not (or no longer) friends. You can only link to friends.</string>
+    <string name="guest_link_error_linked">This guest is already linked to an account.</string>
+    <string name="guest_link_error_rejected">This person declined being linked to this guest before.</string>
+    <string name="guest_link_error_unavailable">Not possible right now: you are offline or your account is not ready yet. Try again after the next sync.</string>
+    <string name="sharing_assigned">A friend assigned one of their guests to you.</string>
+    <string name="sharing_reject_assignment_text">The assignment is removed for all matches with this guest and blocked for good. The matches disappear from your view.</string>
 </resources>

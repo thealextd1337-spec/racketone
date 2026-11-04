@@ -1,9 +1,12 @@
 package eu.advantly.presentation.match
 
 import eu.advantly.core.model.DeviceId
+import eu.advantly.core.model.Lineup
+import eu.advantly.core.model.Placeholders
 import eu.advantly.core.model.PlayerId
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.scoring.Presets
 import eu.advantly.data.PlayerKind
 import eu.advantly.data.createInMemoryJvmLocalData
 import eu.advantly.data.scoreEvents
@@ -96,6 +99,48 @@ class FriendPlayerPresentationTest {
         assertFalse(rematch.isFriendSeated("carol-profile"))
         assertNull(rematch.assignFriend(PlayerPlace(Side.A, 0), "bob-profile", "Renamed"))
         assertEquals("Bobby", data.players.get(bob.id)?.displayName)
+        store.close()
+    }
+
+    /** plan-0.6.3 §3.4: Platzhalter nachträglich an „Du“ (ohne Namen) und an einen Freund; der Upload verknüpft den Freund. */
+    @Test
+    fun placeholderTakesTheUnnamedSelfOrAFriendWhoseProfileGoesUp() {
+        val data = createInMemoryJvmLocalData()
+        var index = 0
+        data.accountIdentities.select("scope-alice", "alice", 0, "PHONE") { "alice-${index++}" }
+        val me = data.players.ensureSelf("", 1) { PlayerId("me") }.id
+        // Eigene Quelle des Kontos: nur deren Matches gehen hoch
+        val source = data.accountIdentities.currentSources().single()
+        val session = MatchSession(data, null, ManualScheduler(), SessionConfig(DeviceId(source), PeerKind.PHONE), { 10 })
+        val store = SessionMatchStore(session)
+        val bea = store.addGuest("Bea")
+        val slot = Placeholders.id("opponent")
+        val id = session.create(Presets.BADMINTON_1GAME_15.format(), Lineup(listOf(bea.id), listOf(slot), bea.id))
+
+        assertNull(store.assignmentFailure(id, slot, me))
+        assertTrue(store.assignPlayer(id, slot, me))
+        val bob = store.addFriend("bob-profile", "Bob")!!
+        assertTrue(store.assignPlayer(id, slot, bob.id))
+        assertEquals(
+            "Bob",
+            store
+                .record(id)
+                ?.summary
+                ?.setup
+                ?.player(slot)
+                ?.displayName,
+        )
+
+        val upload = data.cloudUploads.activate("alice").also { data.cloudUploads.bindOwnedDevices(it, setOf(source)) }
+        val participant =
+            data.cloudUploads
+                .capture(upload, 100)
+                .participants
+                .single()
+                .value.participants
+                .single { it.team == "B" }
+        assertEquals("bob-profile", participant.profileId)
+        assertEquals("Bob", participant.displayName)
         store.close()
     }
 }

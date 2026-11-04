@@ -56,6 +56,8 @@ typealias PlayerAssignmentFailure = eu.advantly.match.session.PlayerAssignmentFa
  *   die UI zeigt dann „Du“)
  * @property assignedPlayers ursprüngliche Platz-ID → zugewiesene Person; Score und Rotation behalten die Platz-ID
  * @property previousMatchId verknüpftes Vor-Match bei „Noch einer in gleicher Besetzung?“ (02 §5.2)
+ * @property linkedProfiles Gast-ID → Freundeskonto, mit dem der Server genau diesen Platz verknüpft hat (Gast-Zuordnung,
+ *   plan-0.6.3 §3.5); nur zur Anzeige des Freundesnamens, ohne Eintrag bleibt der Gastname
  */
 data class MatchSetup(
     val format: MatchFormat,
@@ -64,6 +66,7 @@ data class MatchSetup(
     val players: List<Player>,
     val previousMatchId: MatchId? = null,
     val assignedPlayers: Map<PlayerId, Player> = emptyMap(),
+    val linkedProfiles: Map<PlayerId, String> = emptyMap(),
 ) {
     val sport: Sport get() = format.sport
 
@@ -616,6 +619,9 @@ interface PlayersPort {
 
     /** Profil des als Freund eingetragenen Spielers [id] (aktuelles Konto), sonst `null`; nur für die Auswahl im Assistenten. */
     fun friendProfile(id: PlayerId): String? = null
+
+    /** Konto hinter [id]: Freund oder per Gast-Zuordnung verknüpft (plan-0.6.3 §3.5); für „schon belegt“ in der Auswahl. */
+    fun linkedProfile(id: PlayerId): String? = friendProfile(id)
 
     /** Speichert [setup] als Favoriten (ohne `previousMatchId`). */
     fun saveFavorite(setup: MatchSetup): FavoriteLineup

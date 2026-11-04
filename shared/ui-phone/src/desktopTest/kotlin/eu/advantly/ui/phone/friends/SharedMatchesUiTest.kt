@@ -216,16 +216,51 @@ class SharedMatchesUiTest {
                     onNodeWithTag("friends_feed_feed-1").assertTextContains("Tennis · Beendet · 2026-10-26", substring = true)
                     onNodeWithTag(
                         "friends_feed_feed-1",
-                    ).assertTextContains("Carla mit sehr langem Alias gegen Unbekanntes Profil", substring = true)
+                    ).assertTextContains("Carla mit sehr langem Alias gegen Spieler 2", substring = true)
                     screenshot("feed-de-200")
                     click("friends_feed_feed-1")
                     onNodeWithTag("friends_feed_winner").assertTextContains("Sieg: Carla mit sehr langem Alias")
                     onNodeWithTag("friends_feed_set_1").assertTextContains("Satz 2: 7:5")
-                    onNodeWithTag("friends_feed_team_b").assertTextContains("Seite B: Unbekanntes Profil")
+                    onNodeWithTag("friends_feed_team_b").assertTextContains("Seite B: Spieler 2")
                     screenshot("feed-detail-de-200")
                     click("friends_feed_back")
                     onNodeWithTag("friends_feed_detail").assertDoesNotExist()
                     onNodeWithTag("friends_feed_feed-1").assertExists()
+                } finally {
+                    model.close()
+                    scope.cancel()
+                }
+            }
+        }
+
+    /** plan-0.6.3 §3.1/§3.6: „?“ und leer → „Player N“ nach festem Platz; redigiert → „Deleted player“, auch vor Namen. */
+    @Test fun feedNamesUnnamedAndDeletedPlacesInEnglish() =
+        withLocale(Locale.ENGLISH) {
+            runDesktopComposeUiTest(width = 360, height = 1200) {
+                val doubles =
+                    feedMatch.copy(
+                        discipline = "doubles",
+                        participants =
+                            listOf(
+                                participant("a1", "A", "Carla", "carla-id"),
+                                participant("a2", "A", "?").copy(position = 2),
+                                participant("b1", "B", "Anja", "anja-id").copy(deletedProfile = true),
+                                participant("b2", "B", "").copy(position = 2),
+                            ),
+                    )
+                val local =
+                    object : SharedMatchesLocal by UiLocal {
+                        override fun feed(profileId: String) = listOf(doubles)
+                    }
+                val scope = CoroutineScope(Dispatchers.Unconfined + Job())
+                val auth = FakePhoneAuth().apply { session.value = CloudSession("alice", true, consentStatus = ConsentStatus.CURRENT) }
+                val model = FriendsViewModel(auth, Friendly, { emptyList() }, null, scope, UiShared(), local)
+                setContent { AdvantlyTheme(darkTheme = false) { FriendsScreen(model, onOpenAccount = {}, onShareText = null) } }
+                try {
+                    click("friends_segment_feed")
+                    onNodeWithTag(
+                        "friends_feed_feed-1",
+                    ).assertTextContains("Carla / Player 2 vs. Deleted player / Player 4", substring = true)
                 } finally {
                     model.close()
                     scope.cancel()

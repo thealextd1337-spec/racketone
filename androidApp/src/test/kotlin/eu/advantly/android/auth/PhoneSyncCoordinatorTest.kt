@@ -160,6 +160,9 @@ class PhoneSyncCoordinatorTest {
         var pullOffline = false
         var pushOffline = false
         var reject = false
+
+        /** Server lehnt jedes Match endgültig ab (`invalid`), seine Events bleiben `unknown_match`. */
+        var rejectMatch = false
         var hostAccess = true
 
         /** Nur das Gate des Koordinators: Seine Prüfung kann der eines Hosts vorauslaufen. */
@@ -224,15 +227,21 @@ class PhoneSyncCoordinatorTest {
                                             players = batch.players.map { ItemResult(it.id, "ok") },
                                             matches =
                                                 batch.matches.map {
-                                                    ItemResult(
-                                                        it.id,
-                                                        "updated",
-                                                        projection = it.projection?.let { "applied" },
-                                                    )
+                                                    if (rejectMatch) {
+                                                        ItemResult(it.id, "rejected", "invalid")
+                                                    } else {
+                                                        ItemResult(
+                                                            it.id,
+                                                            "updated",
+                                                            projection = it.projection?.let { "applied" },
+                                                        )
+                                                    }
                                                 },
                                             events =
                                                 batch.events.map {
-                                                    if (reject) {
+                                                    if (rejectMatch) {
+                                                        ItemResult(it.id, "rejected", "unknown_match")
+                                                    } else if (reject) {
                                                         ItemResult(
                                                             it.id,
                                                             "rejected",
@@ -519,6 +528,30 @@ class PhoneSyncCoordinatorTest {
                 } finally {
                     f.close()
                 }
+            }
+        }
+
+    /** Plan 0.6.3 §3.2: Ein abgelehntes Match bleibt bei automatischen Anlässen zurückgestellt, der manuelle Abgleich versucht es. */
+    @Test fun onlyAManualSyncRetriesAPermanentlyRejectedMatch() =
+        runBlocking {
+            val f = Fixture(this)
+            try {
+                f.signIn()
+                f.firstCycle()
+                f.rejectMatch = true
+                f.match()
+                f.cycle()
+                val pushes = f.count("start:cloud_sync_push_v1")
+                assertTrue(pushes > 0)
+                f.nowMs += 5_000
+                f.cycle()
+                assertEquals("Automatischer Anlass sendet das zurückgestellte Match nicht", pushes, f.count("start:cloud_sync_push_v1"))
+                assertTrue(f.upload.state.value.pendingEvents!! > 0)
+                f.sync.syncNow()
+                withTimeout(15_000) { while (f.sync.state.value.running) yield() }
+                assertTrue("Manueller Abgleich versucht es erneut", f.count("start:cloud_sync_push_v1") > pushes)
+            } finally {
+                f.close()
             }
         }
 

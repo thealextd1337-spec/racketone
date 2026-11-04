@@ -12,6 +12,8 @@ data class OutboxUpdate(
     val retry: Set<String>,
     /** Matches, deren Projektion noch nicht übernommen wurde (`ahead_of_events` oder keine Antwort). */
     val projectionRetry: Set<String> = emptySet(),
+    /** Matches, die der Server endgültig abgelehnt hat → zurückstellen, bis sich etwas ändert (Plan 0.6.3 §3.2). */
+    val held: Set<String> = emptySet(),
 )
 
 /**
@@ -32,6 +34,12 @@ object OutboxPlanner {
 
     /** Projektions-Ergebnisse, bei denen der nächste Lauf es erneut versuchen soll. */
     val RETRYABLE_PROJECTIONS: Set<String> = setOf("ahead_of_events")
+
+    /**
+     * Match-Ablehnungen, die eine Wiederholung mit denselben Daten nicht behebt; ihre Events kämen sonst als
+     * `unknown_match` in jedem Batch wieder. `not_owner` bleibt wie bisher.
+     */
+    val FINAL_MATCH_REJECTIONS: Set<String> = setOf("invalid", "court_invalid", "tournament_forbidden")
 
     fun plan(
         events: List<StoredEvent>,
@@ -97,6 +105,10 @@ object OutboxPlanner {
                     val projection = matchResults[header.id]?.projection
                     projection == null || projection in RETRYABLE_PROJECTIONS
                 }.mapTo(mutableSetOf()) { it.id }
-        return OutboxUpdate(uploaded, rejected, retry, projectionRetry)
+        val held =
+            response.matches
+                .filter { it.id != null && it.result == "rejected" && it.reason in FINAL_MATCH_REJECTIONS }
+                .mapNotNullTo(mutableSetOf()) { result -> result.id?.takeIf { id -> sent.matches.any { it.id == id } } }
+        return OutboxUpdate(uploaded, rejected, retry, projectionRetry, held)
     }
 }

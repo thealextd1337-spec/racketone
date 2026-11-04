@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import eu.advantly.core.model.Side
 import eu.advantly.presentation.friends.FriendEntry
 import eu.advantly.presentation.friends.FriendsAccess
 import eu.advantly.presentation.friends.FriendsViewModel
@@ -241,7 +242,7 @@ internal fun WatchedRow(
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Text(headline(match), style = MaterialTheme.typography.bodyLarge, color = colors.text)
-        Text(stringResource(Res.string.friends_feed_vs, names(match.teamA), names(match.teamB)), color = colors.text2)
+        Text(stringResource(Res.string.friends_feed_vs, names(match, Side.A), names(match, Side.B)), color = colors.text2)
         if (match.sets.isNotEmpty()) {
             Text(
                 match.sets.joinToString("  ") { (a, b) -> "$a:$b" },

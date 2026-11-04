@@ -979,9 +979,20 @@ class MatchSession(
         val assigned = data.assignments(matchId)
         if (assigned[slot]?.id == playerId || playerId == null) return null
         val player = data.players.get(playerId) ?: return PlayerAssignmentFailure.INVALID_PLAYER
-        if (data.isPlaceholder(playerId) || player.displayName.isBlank()) return PlayerAssignmentFailure.INVALID_PLAYER
+        // Der eigene Spieler hat lokal oft keinen Namen („Du“); er bleibt zuweisbar (plan-0.6.3 §3.4).
+        if (data.isPlaceholder(playerId) || (player.displayName.isBlank() && !data.isSelf(playerId))) {
+            return PlayerAssignmentFailure.INVALID_PLAYER
+        }
         val occupied = data.resolvedLineup(record).let { it.a + it.b } - listOfNotNull(assigned[slot]?.id)
-        if (occupied.any { it == playerId || (data.isSelf(it) && data.isSelf(playerId)) }) return PlayerAssignmentFailure.OCCUPIED
+        // Dieselbe Person auch über Freund bzw. Gast-Zuordnung (z. B. Test1 → Anja und Anja als Freund).
+        val profile = data.linkedProfile(playerId)
+        if (occupied.any {
+                it == playerId || (data.isSelf(it) && data.isSelf(playerId)) ||
+                    (profile != null && data.linkedProfile(it) == profile)
+            }
+        ) {
+            return PlayerAssignmentFailure.OCCUPIED
+        }
         return null
     }
 
