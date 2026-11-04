@@ -14,7 +14,8 @@ Nacharbeiten aus 0.6.1/0.6.2 und Nutzerwünsche vom 04.11.2026:
    Upload-Batch.
 4. **Platzhalter zuweisen:** In der nachträglichen Zuweisung stehen auch Freunde aus der Freundesliste und „Du“ zur Wahl.
 5. **Gast mit Freund verknüpfen:** Einmalig alle Matches eines Gasts (z. B. „Test1“) einem Freund (z. B. Anja) zuordnen.
-   Der Feldtest folgt mit 0.6.3.
+6. **Kontolöschung:** Ergebnisse bleiben bei den anderen erhalten, Namen werden zu „Gelöschter Spieler“; mit 3.1 und 3.5
+   abgestimmt und getestet. Der Feldtest folgt mit 0.6.3.
 
 ## 2. Ausgangslage (Stand 0.6.2)
 
@@ -118,6 +119,35 @@ Nacharbeiten aus 0.6.1/0.6.2 und Nutzerwünsche vom 04.11.2026:
 - **Datenschutz:** Keine neuen Datenarten. Die Verknüpfung von Teilnehmern mit Freundeskonten steht schon in der
   Datenschutzerklärung (Freunde/geteilte Matches). Vor dem Release mit §4.3 der Erklärung abgleichen. Falls ein Satz fehlt,
   den Nutzer fragen (neue Fassung = neue Bestätigung).
+
+### 3.6 Kontolöschung: Verhalten prüfen und absichern (keine neue Fachlogik)
+
+Heutiger Stand laut `20261015000800_rpc_konto_export.sql` und `20261022000200_staged_account_deletion.sql`, der beim Bauen
+per Test zu bestätigen ist:
+- **Löscht ein Mitspieler sein Konto** (z. B. Anja):
+  - Bei den anderen bleiben das Match, der Spielstand, die Sätze, der Sieger und die Statistik unverändert.
+  - Ihr Platz heißt danach „Gelöschter Spieler“, auch in den Event-Payloads (Redaktionsepoche, Clients laden neu).
+  - Ihr Konto, ihr Verlauf und ihre Statistik sind weg.
+- **Löscht der Ersteller sein Konto:**
+  - Matches mit weiteren verknüpften Konten gehen an den ersten verknüpften Teilnehmer über.
+  - Matches nur mit Gästen werden gelöscht.
+  - Seine eigenen Gäste werden in gemeinsamen Matches zu „Gelöschter Spieler“.
+- **Gast, der einem Freund zugeordnet ist (3.5), und der Freund löscht sein Konto:**
+  - In den Matches steht „Gelöschter Spieler“, nicht wieder „Test1“. Das ist datenschutzkonform, weil der Gast mit ihrer
+    Identität verknüpft war.
+  - Die Ergebnisse bleiben.
+  - Den Gast lässt die App nicht erneut verknüpfen (Redaktions-Schreibsperre).
+- **Löscht der Freund während einer laufenden Zuordnung** (Status `deleting`), scheitert `assign_player` sauber mit eigenem
+  Fehlertext.
+
+Umsetzung in 0.6.3:
+- **„Gelöschter Spieler“ lokalisiert anzeigen:** EN „Deleted player“. Der Server liefert dazu das Flag `deleted_profile`.
+  Es hat Vorrang vor „Spieler N“ (3.1) und vor Gast- bzw. Freundesnamen.
+- **Gästeliste (3.5):** Ein Gast, dessen Freund gelöscht wurde, wird nicht mehr als „verknüpft mit …“ geführt. Die Aktion
+  „Mit Freund verknüpfen“ fehlt, wenn er redigiert ist.
+- **Tests:** pgTAP-Szenario: Gast zuordnen, Freund löscht sein Konto. Erwartet: Beim Anleger ist das Match erhalten, das
+  Ergebnis unverändert, der Name „Gelöschter Spieler“, `players.profile_id` leer, eine erneute Zuordnung abgelehnt.
+  Dazu Client-Tests für Anzeige und Gästeliste.
 
 ## 4. Tests
 
