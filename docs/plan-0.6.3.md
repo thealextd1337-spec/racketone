@@ -53,9 +53,14 @@ Drei Nacharbeiten aus 0.6.1/0.6.2:
   `not_owner` verhält sich weiter wie bisher.
 - **Überspringen:** Die Event-Auswahl überspringt solche Matches wie gesperrte (gleicher Mechanismus wie
   `LifecycleProof.admits`). Die Events bleiben lokal ausstehend, es wird **nichts gelöscht**.
-- **Wieder zulassen:** Sobald sich die Metadaten des Matches ändern (neue Revision), das Konto wechselt oder der Nutzer manuell
-  synchronisiert. Ein geänderter Server (wie bei 0.6.1) greift damit spätestens beim nächsten manuellen Abgleich.
-  Optional zusätzlich nach 24 h automatisch erneut versuchen.
+- **Wieder zulassen**, wenn eines davon eintritt:
+  - Die Metadaten des Matches ändern sich (neue Revision).
+  - Das Konto wechselt.
+  - Der Nutzer synchronisiert manuell.
+  - Seit der Ablehnung sind **24 h** vergangen. Dafür wird der Zeitpunkt der Ablehnung mitgespeichert.
+    Den nächsten Versuch löst der nächste reguläre Anlass aus (App im Vordergrund, periodischer Job), es gibt keinen eigenen Wecker.
+    Lehnt der Server erneut ab, beginnen die 24 h von vorn.
+  Eine Server-Korrektur wie in 0.6.1 kommt damit spätestens nach einem Tag bei allen an.
 - **Inventar/Anzeige:** Zurückgestellte Matches zählen als blockiert (wie heute `BLOCKED`), nicht als „hochgeladen“.
 
 ### 3.3 Doppelte Position im Match-Block abfangen (Migration)
@@ -73,8 +78,9 @@ Drei Nacharbeiten aus 0.6.1/0.6.2:
 - **3.1:** Kotlin-Tests für die Nummerierung (Einzel/Doppel, `?`/leer/null, verknüpft, redigiert). UI-Tests DE/EN für
   Feed und Live (`desktopTest`). Wear-Unit-Test für die Live-Ansicht.
 - **3.2:** Regressionstest mit zwei Matches. Match 1 ist dauerhaft abgelehnt und hat ≥ 500 Events, Match 2 ist gültig.
-  Erwartet: Match 2 wird vollständig hochgeladen, die Events von Match 1 bleiben ausstehend. Nach einer Metadaten-Änderung
-  bzw. einem manuellen Abgleich kommt Match 1 wieder dran.
+  Erwartet: Match 2 wird vollständig hochgeladen, die Events von Match 1 bleiben ausstehend. Nach einer Metadaten-Änderung,
+  einem manuellen Abgleich oder 24 h (fester Testzeitpunkt) kommt Match 1 wieder dran. Bei erneuter Ablehnung beginnt die
+  Frist von vorn.
 - **3.3:** pgTAP – zwei Matches im selben Batch, eines mit doppelter Position.
   Erwartet: Der Batch ist erfolgreich, das betroffene Match ist `rejected/invalid`, das andere `created`.
   Ein Platztausch A1 ↔ A2 im Update bleibt erlaubt.
@@ -92,4 +98,3 @@ Drei Nacharbeiten aus 0.6.1/0.6.2:
 ## 6. Offen
 
 - Ob die watchApp (Apple Watch) Cloud-Teilnehmernamen überhaupt anzeigt. Wenn nicht, entfällt 3.1 dort.
-- Automatischer Neuversuch für zurückgestellte Matches (3.2) nach 24 h – ja oder nur manuell.
