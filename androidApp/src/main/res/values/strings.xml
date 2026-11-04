@@ -49,4 +49,7 @@
     <string name="live_relay_channel_description">Shown while your watch keeps score and others follow live</string>
     <string name="live_relay_title">Sharing live score</string>
     <string name="live_relay_text">Your watch is keeping score – teammates and spectators see it live.</string>
+    <!-- Uhr-Zuschauen (0.6.3): unbenannte bzw. redigierte Plätze, vom Handy lokalisiert -->
+    <string name="player_slot_n">Player %1$d</string>
+    <string name="player_deleted">Deleted player</string>
 </resources>

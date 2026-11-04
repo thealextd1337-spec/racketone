@@ -1022,4 +1022,7 @@
     <string name="notifications_hint">Benachrichtigen, wenn Freunde dich in ein Match eintragen oder zum Zuschauen oder Zählen einladen?</string>
     <string name="notifications_hint_enable">Einschalten</string>
     <string name="notifications_hint_later">Nicht jetzt</string>
+    <!-- Cloud-Ansichten (0.6.3): unbenannte bzw. redigierte Plätze -->
+    <string name="player_slot_n">Spieler %1$d</string>
+    <string name="player_deleted">Gelöschter Spieler</string>
 </resources>

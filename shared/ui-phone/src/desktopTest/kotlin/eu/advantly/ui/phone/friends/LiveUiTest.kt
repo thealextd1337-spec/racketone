@@ -155,9 +155,9 @@ private val spectated =
         "doubles",
         listOf(
             VisitorTeamMember("A", 1, "Carol"),
-            VisitorTeamMember("A", 2, "Dora"),
+            VisitorTeamMember("A", 2, "?"),
             VisitorTeamMember("B", 1, "Eve"),
-            VisitorTeamMember("B", 2, "Finn"),
+            VisitorTeamMember("B", 2, "Gelöschter Spieler"),
         ),
         json("""{"sets":[[2,1]],"games":[2,1],"points":["15","0"],"serving":"A"}"""),
         scorerConnected = false,
@@ -255,7 +255,8 @@ class LiveUiTest {
                     first.assertTextContains("Stand vor 12 s")
                     onNodeWithTag("live_offline_m1", useUnmergedTree = true).assertDoesNotExist()
                     val second = onNodeWithTag("live_m2")
-                    second.assertTextContains("Carol / Dora gegen Eve / Finn")
+                    // plan-0.6.3 §3.1/§3.6: Platzhalter als „Spieler N“, redigierte Plätze lokalisiert
+                    second.assertTextContains("Carol / Spieler 2 gegen Eve / Gelöschter Spieler")
                     second.assertTextContains("Stand vor 3 min")
                     second.assertTextContains("Zähler nicht verbunden", substring = true)
                     // Beendetes Zuschau-Match bleibt mit Ergebnis unter „Ich schaue zu“.
@@ -263,6 +264,18 @@ class LiveUiTest {
                     screenshot("live-liste-dunkel-de")
                     click("live_m2")
                     assertEquals("m2", opened)
+                }
+            }
+        }
+
+    @Test fun unnamedAndDeletedPlacesAreLocalizedInEnglish() =
+        withLocale(Locale.ENGLISH) {
+            withModel(UiLive(listOf(spectated))) { model ->
+                runDesktopComposeUiTest(width = 400, height = 900) {
+                    setContent { Dark { FriendsScreen(model, onOpenAccount = {}, onShareText = null, onOpenLive = {}, clock = clock) } }
+                    click("friends_segment_live")
+                    waitForIdle()
+                    onNodeWithTag("live_m2").assertTextContains("Carol / Player 2 vs. Eve / Deleted player")
                 }
             }
         }

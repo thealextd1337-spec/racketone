@@ -1022,4 +1022,7 @@
     <string name="notifications_hint">Get notified when friends add you to a match or ask you to watch or keep score?</string>
     <string name="notifications_hint_enable">Turn on</string>
     <string name="notifications_hint_later">Not now</string>
+    <!-- Cloud-Ansichten (0.6.3): unbenannte bzw. redigierte Plätze -->
+    <string name="player_slot_n">Player %1$d</string>
+    <string name="player_deleted">Deleted player</string>
 </resources>

@@ -14,6 +14,7 @@ import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import eu.advantly.android.AdvantlyPhoneApplication
 import eu.advantly.android.BuildConfig
+import eu.advantly.android.R
 import eu.advantly.android.push.AndroidNotificationSettings
 import eu.advantly.android.push.AndroidPush
 import eu.advantly.android.push.AndroidPushPreferences
@@ -45,6 +46,7 @@ import eu.advantly.presentation.friends.FriendsViewModel
 import eu.advantly.presentation.friends.ScorerHandovers
 import eu.advantly.presentation.friends.SharedMatchesLocal
 import eu.advantly.presentation.friends.VisitorQueue
+import eu.advantly.presentation.match.CloudPlayerName
 import eu.advantly.presentation.push.PushRegistration
 import eu.advantly.presentation.support.SupportViewModel
 import eu.advantly.sync.protocol.LiveView
@@ -351,7 +353,17 @@ internal class PhoneAccountCore private constructor(
      * sie eine Zeitüberschreitung des Abrufs übersteht und der nächste Abruf die Sitzung vorfindet.
      */
     val liveViews =
-        AccountLiveViews(backend, { auth.session.value?.profileId }) {
+        AccountLiveViews(
+            backend,
+            { auth.session.value?.profileId },
+            { name ->
+                when (name) {
+                    is CloudPlayerName.Named -> name.name
+                    is CloudPlayerName.Slot -> context.getString(R.string.player_slot_n, name.number)
+                    CloudPlayerName.Deleted -> context.getString(R.string.player_deleted)
+                }
+            },
+        ) {
             if (refreshAccount == null) runtime.scope.async { auth.refreshProfile() }.await()
         }
 
