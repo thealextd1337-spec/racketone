@@ -240,19 +240,19 @@ fun AdvantlyApp(
                         }
                     }
                 }
+                // Freunde nur mit nutzbarem Konto; sonst liefert das ViewModel eine leere Liste.
+                val friends =
+                    authModel
+                        ?.friends
+                        ?.state
+                        ?.collectAsState()
+                        ?.value
+                        ?.friends
+                        .orEmpty()
                 when (val top = navigator.top.takeUnless { accountRequired }) {
                     Overlay.Wizard -> {
                         Column(Modifier.fillMaxSize().safeContentPadding()) {
                             UpdateRequiredBanner(updateRequired)
-                            // Freunde nur mit nutzbarem Konto; sonst liefert das ViewModel eine leere Liste.
-                            val friends =
-                                authModel
-                                    ?.friends
-                                    ?.state
-                                    ?.collectAsState()
-                                    ?.value
-                                    ?.friends
-                                    .orEmpty()
                             // Zuschauer-Wahl lebt nur, solange der Assistent offen ist.
                             var visitors by remember { mutableStateOf(emptySet<String>()) }
                             var handover by remember { mutableStateOf<String?>(null) }
@@ -274,7 +274,7 @@ fun AdvantlyApp(
                         AdvantlyTheme(darkTheme = true) {
                             LiveScoreScreen(
                                 controller = model.controller,
-                                playerAssignments = { PlaceholderAssignments(it.matchId, it.setup, model.history, model.players) },
+                                playerAssignments = { PlaceholderAssignments(it.matchId, it.setup, model.history, model.players, friends) },
                                 debugTools = debugTools,
                                 onMinimize = { navigator.pop() },
                                 onShowResult = model::openResult,
@@ -316,6 +316,7 @@ fun AdvantlyApp(
                                     it.summary.setup,
                                     model.history,
                                     model.players,
+                                    friends,
                                 )
                             },
                             onBack = { navigator.pop() },
