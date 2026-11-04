@@ -3,7 +3,9 @@
 > Status: Entwurf 2026-11-04 · Bezug: [PLAN](PLAN.md) §1 (Freemium), P2, „Danach“, F22, F27 ·
 > [p2-plan](p2-plan.md) P2-M, §5.6, §5.8, G11 · [03](03-backend-datenmodell.md) A15/A18, §1.7, §3.3.6 ·
 > [04](04-ux-design.md) §3.3 (mehrere Matches), §7.3 (Paywall) · [plan-live-mitspieler](plan-live-mitspieler.md) ·
-> Abrechnung und Entitlements: [plan-pro](plan-pro.md) (entsteht parallel, gilt für alles Gemeinsame)
+> Abrechnung und Entitlements: [plan-pro](plan-pro.md) (gilt für alles Gemeinsame, Pass-Lebenszyklus plan-pro §4.3.1)
+> · Überarbeitet nach Review (Fable, Astra): Pass-Lebenszyklus aus plan-pro, Americano als Entscheidung TE1,
+> Löschpfad `tournament_entries`, „Ergebnis eintragen“, Datenschutzfassung für T1, USt AT
 
 ## 1. Ziel und Nutzer
 
@@ -23,9 +25,10 @@
   Grundgerüst, die App nichts (§2).
 - **„Danach“ (PLAN §4)** meint **Ligen und organisierte Turniere**: Ausschreibung, Anmeldung, Auslosung, Saison-Ranglisten,
   Startgeld, Verbandsanbindung. Das bleibt draußen.
-- **„Americano-Sessions später möglich“:** Americano ist für Padel der häufigste Anlass für einen Abend mit mehreren
-  Plätzen (Marktanalyse [06](06-marktanalyse.md) Z. 124: Nutzer wünschen Americano-Sessions). Der Spielplan dafür ist
-  kleine, reine Logik. Empfehlung: Americano als Format schon im MVP, aber **ohne neues Zählformat** (§3.2).
+- **„Americano-Sessions später möglich“ (PLAN §4):** Americano im MVP **widerspricht diesem Stand** und braucht eine
+  Nutzerentscheidung (**TE1**). Dafür spricht: Americano ist für Padel der häufigste Anlass für einen Abend mit mehreren
+  Plätzen (Marktanalyse [06](06-marktanalyse.md) Z. 124), und der Spielplan ist kleine, reine Logik ohne neues
+  Zählformat (§3.2). Ohne Zustimmung enthält T1 nur Round Robin, Americano rückt nach T2.
 
 | Gehört dazu (dieser Plan) | Bleibt draußen |
 |---|---|
@@ -91,7 +94,7 @@
 |---|---|---|---|---|
 | Turnier anlegen (Name, Sport, Regeln aus Presets), Plätze | ✅ | | | |
 | Teilnehmer: Du, Freunde, Gäste (Schnelleingabe) | ✅ | Beitritt per Turnier-QR für Nicht-Freunde | | |
-| Formate | Round Robin (Einzel, feste Doppel), Americano (wechselnde Partner, Doppel) | Mexicano, Americano „auf Punkte“ (neues Zählformat) | K.-o. (einfach, ohne Setzliste) | Gruppen + K.-o., Trostrunde |
+| Formate | Round Robin (Einzel, feste Doppel), Americano (wechselnde Partner, Doppel) **nur bei TE1 = ja** | Mexicano, Americano „auf Punkte“ (neues Zählformat) | K.-o. (einfach, ohne Setzliste) | Gruppen + K.-o., Trostrunde |
 | Rundenbetrieb | Runde für Runde, Freilos bei ungerader Zahl | Zeitlimit je Runde mit Hinweis | | |
 | Zähler je Platz | dieses Handy (parallel), eigene Uhr (eine), Freund/Helfer per vorhandener Übergabe, „Ergebnis eintragen“ | Teilnehmer zählt eigenes Match auf eigener Uhr ohne Freundschaft (QR) | | |
 | Live-Übersicht für die Leitung | ✅ (lokal + 5-s-Abfrage) | | | Realtime |
@@ -114,7 +117,10 @@ Die Cloud repliziert und verteilt, sie ist für den Ablauf nicht nötig.
    - dieses Handy als Director (mehrere Plätze parallel, F22),
    - die eigene Uhr (höchstens ein Platz),
    - ein Freund oder Helfer mit Konto über `invite_scorer` und die vorhandene Übergabe,
-   - **„Ergebnis eintragen“** ohne Zählen (Engine `ResultCorrected` bzw. Endstand eingeben), wenn niemand zählt.
+   - **„Ergebnis eintragen“** ohne Zählen, wenn niemand zählt. `ResultCorrected` wirkt nur bei `FINISHED`
+     (`Core.kt`, `onResultCorrected`). Ablauf deshalb: Genesis → `MatchEnded(STOPPED)` (beendet, Ergebnis gilt) →
+     `ResultCorrected(sets)`. Die Engine setzt dann `COMPLETED`, `DRAW` bzw. `STOPPED` „wie es steht“. **Nie**
+     `MatchEnded(ABANDONED)`: `ResultCorrection` behielte den Abbruch bei, und das Match zählte nach F21 nicht.
 4. **Americano „auf Zeit“ oder „auf Games“** mit vorhandenen Formaten: Der Zähler beendet mit „Beenden – Ergebnis gilt“
    (F21, `STOPPED`, Gleichstand = `DRAW`). Rangliste nach gewonnenen Games bzw. Punkten je Person. Ein neues
    Zählformat „bis 24/32 Punkte gesamt“ kommt erst in T2 (Engine-Änderung mit Testvektoren).
@@ -169,7 +175,8 @@ Rotationsplan. K.-o. in T3 braucht eine neue Entscheidung (TE1).
 - Ein Club-Abo lohnt sich erst, wenn Leitungen regelmäßig an die Grenze L stoßen. Ein „Vereinskonto“ mit mehreren
   Zahlern gibt es in beiden Stores nicht als Standard. 3.1.3(c) (Enterprise) gilt nur für Verkäufe außerhalb des Stores
   direkt an Organisationen für deren Mitglieder und passt nicht zu Advantly.
-- Netto nach Store-Anteil (§4.4): Pass 2,99 € brutto → ca. 2,51 € ohne 19 % USt → nach 25 % Google-Anteil ca. 1,88 €.
+- Netto nach Store-Anteil (§4.4): Pass 2,99 € brutto → in AT ca. 2,49 € ohne 20 % USt (DE 19 %: 2,51 €) → nach 15 %
+  Google-Anteil (erste 1 Mio. USD Jahreserlös) ca. 2,12 €. Ohne diese Stufe (20/25 % + 5 %) ca. 1,87–1,99 €.
 
 ### 4.4 Store-Regeln (Stand November 2026)
 
@@ -179,7 +186,7 @@ Rotationsplan. K.-o. in T3 braucht eine neue Entscheidung (TE1).
 | Ausnahmen | physische Waren/Dienste (z. B. Platzmiete, Startgeld, Tickets) dürfen **nicht** über Play Billing laufen [G1] | physische Waren/Dienste außerhalb der App ohne IAP (3.1.3(e)); Enterprise-Verkauf (3.1.3(c)) [A1] |
 | Folge für Advantly | Pass und Pro sind digitale Funktionen → Play Billing. Ein Startgeld der Teilnehmer wäre ein realer Dienst und gehört nicht in die App (ausgeschlossen, §1) | dto. StoreKit. Kauf im Web und Nutzung in der App nur, wenn auch per IAP angeboten (3.1.3(b)) |
 | Alternativen EU/DMA | alternative Abrechnung oder Link nach außen in berechtigten Ländern (u. a. EWR, UK, USA) nur mit Programm-Anmeldung [G1][G2] | seit 01.10.2026 EU: IAP 26 % (15 % Small Business), eigene Zahlung 20 % (10 %), Link nach außen 15 % (10 %); Wahl gilt 12 Monate; Elternschranke unter 18, kein Link unter 13 [A2] |
-| Gebühren | ab 30.06.2026 in EWR/UK/USA: Abos 10 % + 5 % Abrechnungsgebühr; Einmalkäufe 20 % (neue Installation) bzw. 25 % (bestehende) + 5 % [G2]; übrige Länder noch 15 % bis 1 Mio. USD/Jahr [G3] | Small Business Program 15 % |
+| Gebühren | ab 30.06.2026 in EWR/UK/USA: Abos 10 % + 5 % Abrechnungsgebühr; Einmalkäufe 20 % (neue Installation) bzw. 25 % (bestehende) + 5 %; **erste 1 Mio. USD Jahreserlös für alle Arten 10 % + 5 %** [G2]; übrige Länder [G3] | Small Business Program 15 % |
 | Umsatzsteuer | Google ermittelt, berechnet und führt die USt für EU-Kunden ab [G4] | Apple rechnet als Kommissionär ebenfalls selbst ab (vor Apple-Start im Vertrag prüfen, nicht verifiziert) |
 | Technik | Play Billing Library ≥ 8 für Updates ab 31.08.2026 [G5]; Verbrauchsartikel nach Gutschrift „consume“, sonst Rückerstattung nach 3 Tagen | Verbrauchsartikel brauchen kein „Wiederherstellen“, der Anspruch liegt im Server |
 
@@ -191,29 +198,24 @@ Kontoeinrichtung gehören zu plan-pro.
 
 | Produkt-ID (Vorschlag) | Art | Wirkung |
 |---|---|---|
-| `tournament_pass_l` | Play: Einmalprodukt, verbrauchbar; Apple: Consumable | Turnier X bekommt Stufe L, bis es endet bzw. höchstens 7 Tage nach Start |
-| Entitlement `pro` (aus plan-pro) | Abo | alle Turniere der Leitung, die sie während aktivem Pro **startet**, bekommen Stufe L |
+| `tournament_pass_l` | Play: Einmalprodukt, verbrauchbar; Apple: Consumable | Turnier X bekommt Stufe L (Zeile in `tournament_licenses`, `source = 'pass'`), bis es endet bzw. höchstens 7 Tage nach Start |
+| Entitlement `pro` (aus plan-pro) | Abo | alle Turniere der Leitung, die sie während aktivem Pro **startet**, bekommen Stufe L (`source = 'pro'`, beim Start geschrieben) |
 | `club` (nur Option C) | Abo | Stufe XL; später |
 
-**Ablauf Pass:**
-1. Leitung tippt beim Anlegen oder Vergrößern „Turnier-Pass“. Die App startet den Kauf mit `obfuscatedAccountId` =
-   Profil-Hash und merkt sich die Turnier-ID.
-2. Die App schickt Kauf-Token + Turnier-ID an den Prüf-Endpunkt aus plan-pro.
-3. Der Server prüft den Token bei Google, bucht ihn **idempotent** (Bestell-ID eindeutig) und setzt
-   `tournaments.tier = 'l'`, `tier_source = 'pass'`, `tier_purchase_ref`.
-4. Erst danach meldet die App den Kauf als verbraucht. Scheitert Schritt 3, bleibt der Kauf offen und wird beim nächsten
-   App-Start erneut geprüft.
-5. Ein Pass, der keinem Turnier zugeordnet wurde, bleibt als Guthaben am Konto und wird beim nächsten Turnier verwendet.
+**Ablauf Pass:** ausschließlich nach dem Zustandsautomaten in plan-pro §4.3.1 (Server bindet und verbraucht,
+Idempotenz über `purchase_token_hash`, nicht gebundener Kauf nach plan-pro E18). Turnierseitig gilt nur: Die App startet
+den Kauf beim Anlegen oder Vergrößern und sendet Token + Turnier-ID; die Stufe steht danach in `tournament_licenses`.
 
 **Prüfungen im Server:**
 - Nur die Leitung (`director_id`) kann ein Turnier hochstufen. Co-Leitung nicht (TE6).
-- Ein Pass gilt für genau ein Turnier. Doppelte Token und Tokens anderer Konten werden abgelehnt.
-- Rückerstattung (Echtzeitmeldung von Google, Webhook aus plan-pro): Ein **laufendes** Turnier läuft weiter. Ein noch
-  geplantes fällt auf „frei“ zurück; Plätze und Teilnehmer über der Grenze bleiben gespeichert, das Starten verlangt
-  dann die Verkleinerung oder einen neuen Kauf.
+- Ein Pass gilt für genau ein Turnier (plan-pro §4.3.1).
+- Rückerstattung: Ein **laufendes oder beendetes** Turnier behält seine Stufe. Ein noch geplantes fällt auf „frei“
+  zurück; Plätze und Teilnehmer über der Grenze bleiben gespeichert, das Starten verlangt dann die Verkleinerung oder
+  einen neuen Kauf.
 - Grenzen prüft der Server bei **Online-Aktionen** (Platz/Teilnehmer hinzufügen, Turnier starten). Er lehnt **nie**
   hochgeladene Events, Matches oder Ergebnisse wegen der Größe ab. Ein offline angelegtes Turnier über der Grenze wird
-  angenommen und markiert (`tier_required > tier`); das nächste Turnier der Leitung verlangt dann die Klärung.
+  angenommen; die Überschreitung berechnet der Server aus `private.tournament_capacity` (keine eigene Spalte), das
+  nächste Turnier der Leitung verlangt dann die Klärung.
 
 ### 4.6 Grenze überschritten, Ablauf, laufende Turniere
 
@@ -221,7 +223,7 @@ Kontoeinrichtung gehören zu plan-pro.
 |---|---|
 | Anlegen: 3. Platz oder 9. Teilnehmer | Hinweis „Kostenlos bis 2 Plätze und 8 Teilnehmer“ mit Pass, Pro, „Kleiner bleiben“ |
 | Turnier läuft, Leitung fügt Nachzügler über der Grenze hinzu | Hinweis + Kaufangebot; Turnier läuft unverändert weiter |
-| Pro läuft während eines laufenden Turniers ab | **keine Wirkung.** Die Stufe wird beim Start festgeschrieben (`tier_locked_at`) und sinkt nie |
+| Pro läuft während eines laufenden Turniers ab | **keine Wirkung.** Die Stufe wird beim Start festgeschrieben (`tournament_licenses.locked_at`) und sinkt nie |
 | Turnier beendet | dauerhaft lesbar, Tabelle teilbar, Export frei |
 | Pro abgelaufen, neues Turnier | wieder Grenzen „frei“; alte Turniere bleiben vollständig |
 | Offline, Cache abgelaufen | App nimmt den letzten bekannten Anspruch (Kulanzfrist aus plan-pro); im Zweifel **zulassen** |
@@ -256,16 +258,16 @@ Startwert für die Auslosung kommt als Parameter. Abhängigkeiten: `match-sessio
 
 | Änderung | Inhalt |
 |---|---|
-| `tournaments` + Spalten | `format` (`round_robin`/`americano`/`mexicano`/`knockout`), `discipline`, `match_format jsonb` (Preset), `seed bigint`, `tier` (`free`/`l`/`xl`), `tier_source` (`free`/`pass`/`pro`/`club`), `tier_purchase_ref`, `tier_locked_at`, `tier_required`, `deleted_at` |
+| `tournaments` + Spalten | `format` (`round_robin`/`americano`/`mexicano`/`knockout`), `discipline`, `match_format jsonb` (Preset), `seed bigint`, `deleted_at`. **Keine `tier*`-Spalten:** die Stufe steht nur in `tournament_licenses` (plan-pro §4.2) |
 | neu `tournament_entries` | `id`, `tournament_id`, `display_name` (1–40), `player_id` → `players` (Gast der Leitung) **oder** `profile_id` (Freund), `team_key` (feste Doppel), `withdrawn_at`, `sort_order`; Unique (Turnier, Profil) |
 | neu `tournament_rounds` | `tournament_id`, `round_no`, `status` (`planned`/`running`/`done`), `created_at`; Matches tragen `meta.round` bzw. neue Spalte `round_no` |
 | `matches` | Teilnehmer eines Turnier-Matches verweisen auf `tournament_entries` (`entry_id` in `match_participants`), damit die Tabelle Personen über Runden und Partnerwechsel zuordnet |
 | Schreiben nur per RPC | `cloud_tournament_push_v1(batch)` für Kopf, Plätze, Teilnehmer, Runden (idempotent, LWW je Zeile wie Match-Kopf). Direkte Tabellen-Grants für `tournaments`/`tournament_courts` entfallen (L11) |
 | Lesen | `cloud_tournament_overview_v1(id)` (Leitung/Staff, Abfrage alle 5 s), `cloud_tournament_view_v1(id)` (Teilnehmer, T2), `sync_pull` liefert eigene Turniere als neue Sektion |
-| Grenzen | `private.tournament_capacity(id)` aus `tier`; Prüfung in `cloud_tournament_push_v1` nur bei Hinzufügen und `planned → running` (§4.5) |
-| Kauf | Schreiben von `tier*` nur Service-Rolle aus dem Prüf-Endpunkt (plan-pro) |
+| Grenzen | `private.tournament_capacity(id)` aus `tournament_licenses` (ohne Zeile: frei); Prüfung in `cloud_tournament_push_v1` nur bei Hinzufügen und `planned → running` (§4.5) |
+| Kauf | `tournament_licenses` schreibt nur die Service-Rolle aus dem Prüf-Endpunkt (plan-pro §4.3.1) |
 | Export | `export_my_data`: eigene Turniere (als Leitung) mit Plätzen, Teilnehmernamen, Runden; eigene Teilnahmen als Verweis |
-| Löschung | Turnier löschen = Tombstone; Matches behalten ihre Teilnehmer-Verknüpfungen (Löschen = nur eigene Sicht). Kontolöschung: Turniere der Leitung wie heute; verknüpfte Einträge folgen der Regel aus [0.6.4](plan-0.6.4.md) (Gastname bleibt, direkte Freundesplätze → „Gelöschter Spieler“) |
+| Löschung | Turnier löschen = Tombstone; Matches behalten ihre Teilnehmer-Verknüpfungen (Löschen = nur eigene Sicht). Kontolöschung: Turniere der Leitung wie heute. **`tournament_entries.display_name` muss in den Lösch- und Redaktionspfad** (Phase A/B, `purge_account`, `capture_profile_redactions`, `redact_linked_names`): Einträge mit `profile_id` des gelöschten Kontos → „Gelöschter Spieler“; Gast-Einträge folgen [0.6.5](plan-0.6.4.md). pgTAP-Fall analog 470 |
 
 ### 5.3 Wer darf was
 
@@ -311,10 +313,9 @@ Eintrag) oder Helfer, beschränkt auf dieses Turnier und bis 7 Tage nach Ende; d
   oder löschen.
 - **Export:** Turniere der Leitung und eigene Teilnahmen (§5.2). **Löschung:** §5.2.
 - **Datenschutzerklärung:** neuer Abschnitt „Turniere“ (`site/app-datenschutz.html` + `site/en/app-privacy.html`):
-  Sichtbarkeit von Namen/Ergebnissen im Turnier, Helfer, Kaufdaten, später öffentlicher Link. Das ist eine **neue
-  `privacy_notice`-Fassung (nach PRIVACY 9)**, alle Konten bestätigen neu. Empfehlung: **eine** Fassung zusammen mit
-  plan-pro (Abrechnung), damit niemand zweimal bestätigen muss (TE10). Der Pilot-MVP ohne Kauf und ohne Nicht-Freunde
-  braucht eventuell keine neue Fassung; vor T1 prüfen.
+  Teilnehmerliste im Server (`tournament_entries`), Sichtbarkeit von Namen/Ergebnissen im Turnier, Helfer, Tabelle,
+  Löschung; Kaufdaten erst mit plan-pro. **T1 braucht sicher eine neue Fassung**, alle Konten bestätigen neu. Sie wird
+  mit dem T1-Release eingetragen, nicht mit plan-pro (Turnier kommt vorher; Bündelung siehe `plan-reste-0.6.x.md` §2.1).
 - **Play-Datensicherheit:** „Finanzdaten → Kaufverlauf“ neu (mit plan-pro). Namen (vom Nutzer eingegeben) und
   App-Interaktionen sind schon deklariert; prüfen, dass „mit anderen Nutzern geteilt“ auch Turnier-Teilnehmer abdeckt.
 - **Apple Privacy Label:** mit iOS-Konto nachziehen.
@@ -361,8 +362,9 @@ Alle Texte DE + EN (`ui-phone` composeResources, Wear `res/values*`), `StringRes
 | `shared/tournament` (jvmTest, Kotest Property, fester Seed) | Round Robin: jeder gegen jeden genau einmal; Americano: kein Partner doppelt, solange möglich; Freilose höchstens 1 Unterschied; gleicher Seed → gleicher Plan; Tabelle mit Gleichständen (Regel-Tabelle) |
 | `shared/data` / `match-session` | Turnier offline anlegen, zählen, App-Kill, Upload ohne Doppelungen; geplantes Match auf Zähler-Gerät starten (Genesis mit vorhandener ID) |
 | `presentation` | ViewModel-Tests Assistent, Cockpit, Grenzen-Hinweis, „nie mitten im Turnier sperren“ |
-| pgTAP (neue Datei, z. B. `480_turnier_teilnehmer.test.sql`) | Rechte-Matrix §5.3, Fremde/Visitor ohne Zugriff, Grenzen nur bei Hinzufügen/Start, Upload über Grenze nie abgelehnt, `tier` nur Service-Rolle, Export enthält Turniere, Kontolöschung (Leitung/Teilnehmer), keine Telemetrieschlüssel |
-| Kauf (mit plan-pro) | Token doppelt, fremdes Konto, Rückerstattung laufend/geplant, Offline-Cache |
+| pgTAP (neue Datei, z. B. `480_turnier_teilnehmer.test.sql`) | Rechte-Matrix §5.3, Fremde/Visitor ohne Zugriff, Grenzen nur bei Hinzufügen/Start, Upload über Grenze nie abgelehnt, `tournament_licenses` nur Service-Rolle, Export enthält Turniere, Kontolöschung (Leitung/Teilnehmer) mit `tournament_entries` redigiert (analog 470), gleicher Endzustand Job-Pfad und `purge_account`, keine Telemetrieschlüssel |
+| Engine/`match-session` | „Ergebnis eintragen“: `MatchEnded(STOPPED)` + `ResultCorrected` ergibt `COMPLETED`/`DRAW` und zählt in der Tabelle; kein `ABANDONED` |
+| Kauf (mit plan-pro) | Übergänge aus plan-pro §4.3.1, Token doppelt, fremdes Konto, Rückerstattung laufend/geplant, Offline-Cache |
 | Feldtest | p2-plan G11 erweitert: Americano 8 Personen, 2 Plätze, ein Platz Leitungs-Handy, einer Helfer-Uhr, Flugmodus mitten in Runde 2 |
 
 ### 8.2 Phasen
@@ -389,9 +391,9 @@ Größen wie p2-plan: S ≤ 2 Tage, M ≤ 1 Woche, L > 1 Woche Agentenarbeit ink
 | Umfang wächst Richtung Liga/Vereinssoftware | Abgrenzung §1; jede Erweiterung nach T2 braucht eine Entscheidung |
 | Helfer müssen Freunde sein (Reibung im Club) | T1 akzeptieren, T2 Turnier-QR (TE2) |
 | Paywall schreckt Pilot ab | im Pilot alles frei; Grenzen erst mit plan-pro aktiv |
-| Kauf erfolgreich, Gutschrift scheitert | Gutschrift vor „consume“, Wiederholung beim App-Start, Guthaben am Konto |
+| Kauf erfolgreich, Bindung scheitert | Zustandsautomat plan-pro §4.3.1: Server verbraucht erst nach Bindung, Wiederholung beim App-Start, sonst E18 |
 | Sperre mitten im Turnier durch Ablauf/Rückerstattung | Stufe beim Start festschreiben; Server lehnt Daten nie wegen Größe ab |
-| Zweite Bestätigung der Datenschutzerklärung nervt | eine Fassung gemeinsam mit plan-pro |
+| Zweite Bestätigung der Datenschutzerklärung nervt | Bündelung nach `plan-reste-0.6.x.md` §2.1 (Nutzerentscheidung) |
 | Americano „auf Punkte“ ändert die Engine | erst T2, mit Testvektoren und Regel-Prüfer |
 | Store-Gebühren und Regeln ändern sich 2026/27 schnell | vor Bezahl-Start erneut prüfen (§4.4 Quellen) |
 | Apple fehlt | Android + Wear OS zuerst; Produkte in App Store Connect erst mit Developer-Account |
@@ -400,16 +402,16 @@ Größen wie p2-plan: S ≤ 2 Tage, M ≤ 1 Woche, L > 1 Woche Agentenarbeit ink
 
 | # | Frage | Empfehlung |
 |---|---|---|
-| TE1 | Umfang MVP | T1 wie §3.2: Round Robin + Americano (auf Games/Zeit), Leitung zählt oder weist zu, Übersicht, Tabelle, Bild teilen. K.-o. erst T3 und nur mit neuer Entscheidung zu F27 |
+| TE1 | Umfang MVP, insbesondere **Americano schon in T1** (Abweichung von PLAN §4 „später“) | **Ja:** Round Robin + Americano (auf Games/Zeit), Leitung zählt oder weist zu, Übersicht, Tabelle, Bild teilen. K.-o. erst T3 und nur mit neuer Entscheidung zu F27 |
 | TE2 | Helfer und Teilnehmer ohne Freundschaft | T1 nur Freunde (F27); T2 Turnier-QR, auf das Turnier beschränkt |
 | TE3 | Kostenlose Grenzen | 2 Plätze, 8 Teilnehmer, 1 laufendes Turnier; Matches/Runden/Helfer unbegrenzt |
-| TE4 | Bezahlmodell | Pass 2,99 € je Turnier + Größe L in Pro enthalten; Club-Abo erst bei Nachfrage |
+| TE4 | Bezahlmodell | Pass 2,99 € je Turnier (Lebenszyklus plan-pro §4.3.1) + Größe L in Pro enthalten; Club-Abo erst bei Nachfrage |
 | TE5 | Ab wann kostet es | mit dem Bezahl-Release aus plan-pro; vorher Grenzen nur als Hinweis |
 | TE6 | Wer kann hochstufen | nur die Leitung (Ersteller); Co-Leitung nicht |
-| TE7 | Was passiert bei Ablauf/Rückerstattung | Stufe beim Start festschreiben, laufende Turniere nie sperren, beendete dauerhaft lesbar |
+| TE7 | Was passiert bei Ablauf/Rückerstattung | Stufe beim Start festschreiben (`locked_at`), laufende Turniere behalten sie, beendete dauerhaft lesbar |
 | TE8 | Namen für Teilnehmer, die keine Freunde sind | ja, Alias bzw. Turniername, mit Hinweis beim Beitritt und „Austreten“ (ab T2) |
 | TE9 | Öffentlicher Link | T3, nur Opt-in je Turnier, ohne Konten-IDs |
-| TE10 | Datenschutzerklärung | eine neue Fassung gemeinsam mit plan-pro; vor T1 prüfen, ob der Pilot-MVP schon eine braucht |
+| TE10 | Datenschutzerklärung | Neue Fassung **mit T1** (sicher nötig); Bündelung mit anderen Plänen nach `plan-reste-0.6.x.md` §2.1 |
 | TE11 | Americano „bis 24/32 Punkte“ als eigenes Zählformat | T2, als neues Preset mit Testvektoren |
 | TE12 | Zeitpunkt | T0/T1 jetzt als Abschluss von P2-M; T2 parallel zu P3 |
 | TE13 | Alternative Abrechnung (EU-Programme) | nein, nur Play Billing/StoreKit |
