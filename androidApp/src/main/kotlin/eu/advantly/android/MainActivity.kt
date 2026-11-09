@@ -84,6 +84,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
+        invites.save(outState)
         // Im Ladezustand den Merker des Ursprungs unverändert weitergeben: Eine echte Wiederherstellung bleibt eine.
         val original = createdFrom
         when {
@@ -111,6 +112,7 @@ class MainActivity : ComponentActivity() {
         createdFrom = savedInstanceState
         if (savedInstanceState == null) pushTarget.value = intent.pushTarget()
         invites.take(intent, restored = savedInstanceState != null)
+        invites.restore(savedInstanceState)
         // Kopie und quick_check laufen im Hintergrund; bis dahin nur die Ladeansicht (bekanntes Ergebnis: sofort).
         showInstallationLoading()
         AndroidInstallationGuard.checkAsync(applicationContext) { availability ->

@@ -64,6 +64,8 @@ data class InvitationsState(
     val access: FriendsAccess = FriendsAccess.SIGNED_OUT,
     /** Ein empfangener Link wartet (der Token selbst bleibt im ViewModel/SavedState). */
     val pending: Boolean = false,
+    /** Zählt empfangene Links in diesem Prozess; die UI springt je Empfang nur einmal in den Freunde-Tab. */
+    val received: Int = 0,
     /** Vorschau mit Status `ok` oder `already_friends`: Dialog offen. */
     val preview: InvitePreview? = null,
     val busy: Boolean = false,
@@ -126,7 +128,7 @@ class InvitationsViewModel(
         nextLink()
         savedState[KEY_TOKEN] = token
         savedState[KEY_OWNER] = shown?.profileId
-        show { copy(pending = true, preview = null, busy = false, result = null, problem = null) }
+        show { copy(pending = true, received = received + 1, preview = null, busy = false, result = null, problem = null) }
         load()
         return true
     }

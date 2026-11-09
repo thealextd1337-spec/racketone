@@ -16,6 +16,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -156,15 +157,19 @@ fun AdvantlyApp(
         }
     }
     // Empfangener Einladungslink: Freunde-Tab, dort erscheint die Vorschau (bzw. nach der Anmeldung).
-    val invitePending =
+    // Nur einmal je Empfang (nicht bei jedem Neuaufbau, z. B. Drehen) und nie aus einem laufenden Match heraus.
+    val inviteState =
         authModel
             ?.invitations
             ?.state
             ?.collectAsState()
             ?.value
-            ?.pending == true
-    LaunchedEffect(invitePending) {
-        if (invitePending) {
+    val invitePending = inviteState?.pending == true
+    val inviteReceived = inviteState?.received ?: 0
+    var inviteHandled by rememberSaveable { mutableStateOf(-1) }
+    LaunchedEffect(invitePending, inviteReceived, navigator.top) {
+        if (invitePending && inviteReceived != inviteHandled && navigator.top != Overlay.Live) {
+            inviteHandled = inviteReceived
             navigator.stack.clear()
             navigator.tab = AppTab.Friends
         }

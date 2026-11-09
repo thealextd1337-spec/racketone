@@ -1,6 +1,7 @@
 package eu.advantly.android
 
 import android.content.Intent
+import android.os.Bundle
 import eu.advantly.presentation.friends.InviteLinks
 
 /**
@@ -40,5 +41,20 @@ internal class InviteInbox {
         intent.data = null
         val target = deliver
         if (target != null) target(token) else waiting = token
+    }
+
+    /** Noch nicht zugestellter Link überlebt Drehen bzw. Prozessende während der Installationsprüfung (nur Instance-State). */
+    fun save(out: Bundle) {
+        waiting?.let { out.putString(KEY_WAITING, it) }
+    }
+
+    fun restore(saved: Bundle?) {
+        val token = saved?.getString(KEY_WAITING)?.let(InviteLinks::parse) ?: return
+        val target = deliver
+        if (target != null) target(token) else waiting = token
+    }
+
+    private companion object {
+        const val KEY_WAITING = "invite.waiting"
     }
 }

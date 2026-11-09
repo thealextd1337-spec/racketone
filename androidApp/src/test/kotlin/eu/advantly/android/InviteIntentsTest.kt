@@ -3,6 +3,7 @@ package eu.advantly.android
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
+import android.os.Bundle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -67,5 +68,19 @@ class InviteIntentsTest {
         inbox.take(foreign)
         assertNotNull("fremde URL bleibt unangetastet", foreign.data)
         assertEquals(1, delivered.size)
+    }
+
+    @Test fun undeliveredLinkSurvivesRecreationDuringStartupCheck() {
+        val before = InviteInbox()
+        before.take(view("https://advantly.eu/i/#$TOKEN"))
+        val saved = Bundle().also(before::save)
+        val after = InviteInbox()
+        val delivered = mutableListOf<String>()
+        after.take(view("https://advantly.eu/i/#$TOKEN"), restored = true)
+        after.restore(saved)
+        after.deliver = { delivered += it }
+        assertEquals(listOf(TOKEN), delivered)
+        val empty = Bundle().also(after::save)
+        assertNull("zugestellt: nichts mehr im Instance-State", empty.getString("invite.waiting"))
     }
 }
