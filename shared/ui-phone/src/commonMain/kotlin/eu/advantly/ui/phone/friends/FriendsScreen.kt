@@ -40,6 +40,7 @@ import eu.advantly.cloud.sync.FriendRequestResult
 import eu.advantly.presentation.friends.FriendEntry
 import eu.advantly.presentation.friends.FriendsAccess
 import eu.advantly.presentation.friends.FriendsViewModel
+import eu.advantly.presentation.friends.InvitationsViewModel
 import eu.advantly.presentation.match.WallClock
 import eu.advantly.presentation.push.FriendsSection
 import eu.advantly.presentation.push.NotificationSettingsPort
@@ -151,8 +152,11 @@ fun FriendsScreen(
     notifications: NotificationSettingsPort? = null,
     link: PushTarget? = null,
     onLinkHandled: () -> Unit = {},
+    invitations: InvitationsViewModel? = null,
 ) {
     val state by model.state.collectAsState()
+    // Neuer Freund bei offenem QR: Code wurde eingelöst, der nächste ist fällig (plan-einladungen §1.2).
+    LaunchedEffect(invitations, state.friends) { invitations?.onFriends(state.friends.mapTo(HashSet()) { it.profileId }) }
     var segment by rememberSaveable { mutableStateOf(Segment.FRIENDS) }
     var confirm by remember { mutableStateOf<Confirm?>(null) }
     // Auf Bildschirmebene: Segmentwechsel verwirft die Eingabe nicht.
@@ -210,6 +214,7 @@ fun FriendsScreen(
             modifier = Modifier.semantics { heading() },
         )
         if (state.access != FriendsAccess.READY) {
+            invitations?.let { InvitePendingBanner(it) }
             val hint =
                 when (state.access) {
                     FriendsAccess.SETUP_REQUIRED -> Res.string.friends_access_setup
@@ -245,6 +250,7 @@ fun FriendsScreen(
             TextButton(model::dismissError) { Text(stringResource(Res.string.friends_dismiss)) }
         }
         if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("friends_busy"))
+        invitations?.let { InviteRedeem(it) }
         when (segment) {
             Segment.FEED -> {
                 val opened = state.feed.firstOrNull { it.id == openFeed }
@@ -259,7 +265,8 @@ fun FriendsScreen(
             Segment.FRIENDS -> {
                 // Nach einem Fehler nicht ewig „wird geladen“: ausdrücklich erneut versuchen.
                 OwnCode(state.friendCode, onShareText, retry = if (!state.busy && state.error != null) model::loadCode else null)
-                AddFriend(model, query) { query = it }
+                invitations?.let { InviteBlock(it, onShareText, clock) }
+                AddFriend(model, query, invitations) { query = it }
                 HorizontalDivider()
                 Title(Res.string.friends_list_title)
                 if (state.friends.isEmpty()) Text(stringResource(Res.string.friends_empty), color = colors.text2)
@@ -397,25 +404,31 @@ private fun OwnCode(
 private fun AddFriend(
     model: FriendsViewModel,
     query: String,
+    invitations: InvitationsViewModel?,
     onQuery: (String) -> Unit,
 ) {
     val state by model.state.collectAsState()
+    // Eingefügter Einladungslink (oder Token) öffnet die Vorschau statt der Suche (plan-einladungen §5.1).
+    val submit = {
+        if (invitations?.receive(query) == true) onQuery("") else model.search(query)
+    }
     Title(Res.string.friends_add_title)
     OutlinedTextField(
         query,
         {
-            onQuery(it.take(64))
+            // Platz für einen eingefügten Einladungslink (87 Zeichen); die Suche selbst nimmt höchstens 64.
+            onQuery(it.take(128))
             model.clearSearch()
         },
         label = { Text(stringResource(Res.string.friends_query_label)) },
         supportingText = { Text(stringResource(Res.string.friends_query_hint)) },
         singleLine = true,
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-        keyboardActions = KeyboardActions(onSearch = { model.search(query) }),
+        keyboardActions = KeyboardActions(onSearch = { submit() }),
         modifier = Modifier.fillMaxWidth().testTag("friends_query"),
     )
     Button(
-        { model.search(query) },
+        submit,
         enabled = !state.busy && query.isNotBlank(),
         modifier = Modifier.testTag("friends_search"),
     ) { Text(stringResource(Res.string.friends_search)) }
@@ -439,7 +452,7 @@ private fun AddFriend(
 }
 
 @Composable
-private fun Title(text: StringResource) {
+internal fun Title(text: StringResource) {
     Text(stringResource(text), style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
 }
 

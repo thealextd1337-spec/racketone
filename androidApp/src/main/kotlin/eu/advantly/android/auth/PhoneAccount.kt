@@ -10,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.lifecycle.SavedStateHandle
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import eu.advantly.android.AdvantlyPhoneApplication
@@ -43,6 +44,7 @@ import eu.advantly.presentation.auth.GoogleCredential
 import eu.advantly.presentation.auth.PhonePullPort
 import eu.advantly.presentation.auth.PhoneUploadPort
 import eu.advantly.presentation.friends.FriendsViewModel
+import eu.advantly.presentation.friends.InvitationsViewModel
 import eu.advantly.presentation.friends.ScorerHandovers
 import eu.advantly.presentation.friends.SharedMatchesLocal
 import eu.advantly.presentation.friends.VisitorQueue
@@ -73,12 +75,14 @@ import java.security.SecureRandom
 import kotlin.coroutines.resume
 
 /** Konfiguration fehlt im Standardbuild: P1 funktioniert ohne Konto und ohne Netzwerk unverändert. */
-fun ComponentActivity.createPhoneAccount(): AuthViewModel? = createPhoneAccount(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_KEY)
+fun ComponentActivity.createPhoneAccount(savedState: SavedStateHandle = SavedStateHandle()): AuthViewModel? =
+    createPhoneAccount(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_KEY, savedState)
 
 /** Explizite Konfiguration für Kompositionstests; die öffentliche Factory liefert die BuildConfig-Werte. */
 internal fun ComponentActivity.createPhoneAccount(
     apiUrl: String,
     apiKey: String,
+    savedState: SavedStateHandle = SavedStateHandle(),
 ): AuthViewModel? {
     val core = PhoneAccountCore.get(applicationContext, apiUrl, apiKey) ?: return null
     lateinit var model: AuthViewModel
@@ -116,6 +120,7 @@ internal fun ComponentActivity.createPhoneAccount(
                     core.scorers,
                     core.backend,
                 ),
+            invitations = InvitationsViewModel(account, core.backend, savedState, account.scope, System::currentTimeMillis, pull),
             sync = core.sync,
             export = PhoneExportHost(core.auth.dataExports(), applicationContext, core.runtime.scope),
             support =

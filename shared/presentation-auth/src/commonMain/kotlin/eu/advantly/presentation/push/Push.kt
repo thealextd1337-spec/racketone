@@ -29,6 +29,9 @@ enum class PushKind(
     SCORER_INVITED("scorer_invited", PushChannel.SCORING),
     SCORER_RESPONDED("scorer_responded", PushChannel.SCORING),
     SCORER_CHANGED("scorer_changed", PushChannel.SCORING),
+
+    /** Mein Gast wurde per Claim-Link übernommen (plan-einladungen E8); [PushMessage.playerId] ist der Gast. */
+    PLAYER_CLAIMED("player_claimed", PushChannel.FRIENDS),
 }
 
 /** Abschnitt des Freunde-Tabs, den ein Antippen öffnet. */
@@ -43,11 +46,13 @@ data class PushTarget(
     val matchId: String? = null,
 )
 
-/** Geprüfte FCM-data (`{"v":"1","kind":…,"matchId"?,"profileId"?,"role"?}`); [profileId] ist der Auslöser. */
+/** Geprüfte FCM-data (`{"v":"1","kind":…,"matchId"?,"profileId"?,"playerId"?,"role"?}`); [profileId] ist der Auslöser. */
 data class PushMessage(
     val kind: PushKind,
     val matchId: String? = null,
     val profileId: String? = null,
+    /** Eigener Gast bei [PushKind.PLAYER_CLAIMED]; den Namen setzt die App lokal ein. */
+    val playerId: String? = null,
 ) {
     /** Zuweisungen betreffen meist beendete Matches (Feed); alles rund ums laufende Match öffnet „Live“. */
     val target: PushTarget
@@ -55,7 +60,7 @@ data class PushMessage(
             when (kind) {
                 PushKind.FRIEND_REQUEST -> PushTarget(FriendsSection.REQUESTS)
 
-                PushKind.FRIEND_ACCEPTED -> PushTarget(FriendsSection.FRIENDS)
+                PushKind.FRIEND_ACCEPTED, PushKind.PLAYER_CLAIMED -> PushTarget(FriendsSection.FRIENDS)
 
                 PushKind.PLAYER_ASSIGNED -> PushTarget(FriendsSection.FEED, matchId)
 
@@ -76,7 +81,7 @@ data class PushMessage(
             val kind = PushKind.entries.firstOrNull { it.wire == data["kind"] } ?: return null
 
             fun id(key: String) = data[key]?.takeIf(uuid::matches)
-            return PushMessage(kind, id("matchId"), id("profileId"))
+            return PushMessage(kind, id("matchId"), id("profileId"), id("playerId"))
         }
     }
 }

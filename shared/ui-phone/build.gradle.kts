@@ -17,10 +17,13 @@ kotlin {
             implementation(libs.play.services.wearable)
             // Dateiauswahl (Storage Access Framework) für den Export/Import der Pulsverläufe
             implementation(libs.androidx.activity.compose)
+            // QR-Code-Encoder (plan-einladungen §3.2); iOS nutzt CoreImage
+            implementation(libs.zxing.core)
         }
         named("desktopMain") {
             dependencies {
                 implementation(compose.desktop.currentOs)
+                implementation(libs.zxing.core)
                 implementation(libs.kotlinx.coroutines.swing)
             }
         }

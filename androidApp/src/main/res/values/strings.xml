@@ -34,6 +34,8 @@
     <string name="push_friend_accepted_neutral">Your friend request was accepted</string>
     <string name="push_player_assigned">%1$s added you to a match</string>
     <string name="push_player_assigned_neutral">You were added to a match</string>
+    <string name="push_player_claimed">%1$s took over %2$s</string>
+    <string name="push_player_claimed_neutral">A guest was taken over</string>
     <string name="push_match_shared">%1$s shared a match with you</string>
     <string name="push_match_shared_neutral">A match was shared with you</string>
     <string name="push_visitor_invited">%1$s invites you to watch a match</string>

@@ -179,6 +179,12 @@ class PushRegistrationTest {
             PushMessage.parse(mapOf("v" to "1", "kind" to "scorer_invited", "matchId" to MATCH, "profileId" to ALEX, "role" to "scorer")),
         )
         assertNull(PushMessage.parse(mapOf("v" to "2", "kind" to "friend_request")))
+        // plan-einladungen E8: Einlöser + eigener Gast, Text entsteht lokal.
+        assertEquals(
+            PushMessage(PushKind.PLAYER_CLAIMED, profileId = ALEX, playerId = MATCH),
+            PushMessage.parse(mapOf("v" to "1", "kind" to "player_claimed", "profileId" to ALEX, "playerId" to MATCH)),
+        )
+        assertEquals(PushChannel.FRIENDS, PushKind.PLAYER_CLAIMED.channel)
         assertNull(PushMessage.parse(mapOf("v" to "1", "kind" to "point_scored")))
         assertEquals(
             PushMessage(PushKind.MATCH_SHARED),
@@ -197,6 +203,7 @@ class PushRegistrationTest {
                 PushKind.SCORER_INVITED to PushTarget(FriendsSection.LIVE, MATCH),
                 PushKind.SCORER_RESPONDED to PushTarget(FriendsSection.LIVE, MATCH),
                 PushKind.SCORER_CHANGED to PushTarget(FriendsSection.LIVE, MATCH),
+                PushKind.PLAYER_CLAIMED to PushTarget(FriendsSection.FRIENDS),
             )
         assertEquals(PushKind.entries.toSet(), expected.keys, "jede Art hat ein festgelegtes Ziel")
         for ((kind, target) in expected) assertEquals(target, PushMessage(kind, MATCH, ALEX).target, kind.name)
