@@ -28,6 +28,15 @@ import kotlinx.coroutines.launch
 /** Warum der Freunde-Tab (noch) nicht nutzbar ist; Offline-Zählen bleibt in jedem Fall unberührt. */
 enum class FriendsAccess { SIGNED_OUT, SETUP_REQUIRED, CONSENT_REQUIRED, PAUSED, READY }
 
+internal fun friendsAccess(session: CloudSession?): FriendsAccess =
+    when {
+        session == null -> FriendsAccess.SIGNED_OUT
+        session.deletionRequested || session.suspended -> FriendsAccess.PAUSED
+        !session.onboarded -> FriendsAccess.SETUP_REQUIRED
+        session.consentStatus != ConsentStatus.CURRENT -> FriendsAccess.CONSENT_REQUIRED
+        else -> FriendsAccess.READY
+    }
+
 data class FriendEntry(
     val profileId: String,
     /** `null`/leer: Profil inaktiv oder redigiert. */
@@ -649,7 +658,7 @@ class FriendsViewModel(
 
     private fun onSession(session: CloudSession?) {
         val same = shown?.profileId == session?.profileId && shown?.generation == session?.generation
-        val access = access(session)
+        val access = friendsAccess(session)
         if (same && access == mutable.value.access) return
         if (!same || access != FriendsAccess.READY) {
             // Neues Konto, neue Sitzung oder Rechteverlust: laufende Arbeit und alle Kontodaten verwerfen.
@@ -697,15 +706,6 @@ class FriendsViewModel(
             loadCode()
         }
     }
-
-    private fun access(session: CloudSession?): FriendsAccess =
-        when {
-            session == null -> FriendsAccess.SIGNED_OUT
-            session.deletionRequested || session.suspended -> FriendsAccess.PAUSED
-            !session.onboarded -> FriendsAccess.SETUP_REQUIRED
-            session.consentStatus != ConsentStatus.CURRENT -> FriendsAccess.CONSENT_REQUIRED
-            else -> FriendsAccess.READY
-        }
 
     private fun entry(profileId: String): PulledFriendship? =
         if (profileId in overlay) overlay[profileId] else currentList().firstOrNull { it.profileId == profileId }
