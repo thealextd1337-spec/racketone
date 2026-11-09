@@ -576,7 +576,10 @@ class SupabaseCloudBackend internal constructor(
         return strict {
             val status = InviteStatus.entries.first { it.wire == json.text("status") }
             if (status == InviteStatus.INVALID) return@strict InvitePreview(status)
-            val kind = requireNotNull(InviteKind.of(json.text("kind")))
+            // Art und Einladender sind nur für `ok`/`already_friends` Pflicht; ein endgültiger Status zählt auch ohne sie.
+            val usable = status == InviteStatus.OK || status == InviteStatus.ALREADY_FRIENDS
+            val kind = json.text("kind")?.let { requireNotNull(InviteKind.of(it)) }
+            require(kind != null || !usable)
             val claimable = status == InviteStatus.OK && kind == InviteKind.CLAIM_PLAYER
             InvitePreview(
                 status = status,
@@ -586,7 +589,7 @@ class SupabaseCloudBackend internal constructor(
                 guestName = if (claimable) requireNotNull(json.text("guestName")?.takeIf { it.isNotBlank() }) else null,
                 matchCount = if (claimable) requireNotNull(json.int("matchCount")).also { require(it >= 0) } else null,
                 expiresAtMillis = json.text("expiresAt")?.let { Instant.parse(it).toEpochMilliseconds() },
-            ).also { require(it.inviterId != null || status !in setOf(InviteStatus.OK, InviteStatus.ALREADY_FRIENDS)) }
+            ).also { require(it.inviterId != null || !usable) }
         }
     }
 

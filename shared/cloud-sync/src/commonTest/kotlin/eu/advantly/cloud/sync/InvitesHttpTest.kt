@@ -138,6 +138,17 @@ class InvitesHttpTest {
                     """{"status":"${status.wire}","kind":"friend","inviterId":"bob","inviterAlias":null,"guestName":null,"matchCount":null}"""
                 assertEquals(InvitePreview(status, InviteKind.FRIEND, "bob"), backend.previewInvite("alice", TOKEN))
             }
+            // Endgültige Status gelten auch ohne Art und Einladenden (sonst bliebe der Link fälschlich wartend).
+            for (status in listOf(
+                InviteStatus.EXPIRED,
+                InviteStatus.USED,
+                InviteStatus.REVOKED,
+                InviteStatus.OWN,
+                InviteStatus.ALREADY_CLAIMED,
+            )) {
+                reply = """{"status":"${status.wire}"}"""
+                assertEquals(InvitePreview(status), backend.previewInvite("alice", TOKEN))
+            }
             reply = """{"status":"invalid"}"""
             assertEquals(InvitePreview(InviteStatus.INVALID), backend.previewInvite("alice", TOKEN))
             reply = """{"status":"ok","kind":"claim_player","inviterId":"bob","inviterAlias":"Bob","guestName":"Test1","matchCount":7}"""
