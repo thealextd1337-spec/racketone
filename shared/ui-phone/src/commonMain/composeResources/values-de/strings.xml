@@ -712,6 +712,9 @@
     <string name="whats_new_16_3">Plätze ohne Namen heißen in Live und bei Zuschauern jetzt „Spieler 1“, „Spieler 2“ …, und der Upload ist robuster.</string>
     <string name="whats_new_17_1">Matches, die Freunde angelegt haben: Stehst du dort im anderen Team, zählen Siege, Games und deine Bilanz jetzt richtig für dich.</string>
     <string name="whats_new_17_2">Im Match-Detail stehst du jetzt immer auf der Seite „Wir“, auch in Matches deiner Freunde.</string>
+    <string name="whats_new_18_1">Freunde einladen: Im Freunde-Tab einen Link teilen oder einen QR-Code zeigen – wer ihn öffnet und annimmt, ist sofort dein Freund.</string>
+    <string name="whats_new_18_2">Gäste übernehmen ihre Matches selbst: Im Profil unter Spieler „Einladungslink senden“ – die Person sieht vor dem Annehmen, worum es geht.</string>
+    <string name="whats_new_18_3">Löscht ein verknüpfter Freund sein Konto, bleibt dein Gast mit seinem Namen bei dir erhalten.</string>
     <string name="device_repair">Uhren neu koppeln</string>
     <string name="device_repair_hint">Nutze das, wenn eine Uhr verloren ging oder ersetzt wurde. Jede Uhr muss die Kopplung danach auf der Uhr selbst neu bestätigen; ihre Daten bleiben.</string>
     <string name="device_repair_confirm_title">Alle Uhren neu koppeln?</string>
