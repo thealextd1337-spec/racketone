@@ -348,6 +348,7 @@ serverseitiger Auth-Admin-Widerruf (Ban/Abmeldung über die Supabase-Admin-API) 
 | `admin_account_cancel_deletion(p_profile_id, p_ticket_id, p_reason)` | `admin` | Löschrücknahme wie `cancel_account_deletion`, nur mit Meldung nach dem Antrag | `account_cancel_deletion` (Meldungs-UUID, `ticket_kind` `account`/`guest`) |
 | `admin_account_unrevoke_device(p_profile_id, p_device_id, p_ticket_id, p_reason)` | `admin` | K4-U: Widerruf eines Geräts aufheben, nur mit Meldung nach dem Widerruf | `device_unrevoke` (`via` `admin`, Gerät, Meldungs-UUID, `ticket_kind`, `ticket_uses`) |
 | `cloud_unrevoke_device_v1(p_device_id)` | Konto mit anderem, schon vor dem Widerruf gebundenem Gerät (Installationsnachweis) | K4-U: Widerruf eines anderen eigenen Geräts aufheben | `device_unrevoke` (`via` `device`, freigegebenes und freigebendes Gerät, ohne Begründung) |
+| `admin_redact_guest_name(p_player_id, p_reason)` | `admin` | 0.7.0 (`20261109000200`): Gastname auf Widerspruch bzw. Löschverlangen redigieren (Art. 21/17); löst eine Verknüpfung, Schreibsperre, Manifest, Teilnehmer-/Player-/PlayerAssigned-Namen, Epoche, offene Claim-Links widerrufen; zweiter Aufruf ohne Wirkung. Fehler `player_not_found` (auch Self) | `guest_name_redact` (Ziel = Anleger, `changes` nur `player_id` und Matchzahl, kein Gastname) |
 
 Alle prüfen bei jedem Aufruf Mitgliedschaft und AAL2 (`support_forbidden`, `support_mfa_required`), schreibende
 zusätzlich `admin` (`support_admin_required`) nach `lock_sync()`. Begründung 1–500 Zeichen (`support_invalid`).
@@ -512,3 +513,12 @@ Plan: [docs/plan-live-mitspieler.md](../docs/plan-live-mitspieler.md) (§8 Schni
   Turnierleitung (§7, gilt auch für Projektionen); `sync_pull` liefert `roles.deviceId` an alle Mitglieder;
   `respond_scorer_invitation` erlaubt bei angenommener Rolle den Gerätewechsel, nie auf widerrufene Geräte;
   Blockieren/Entfreunden widerrufen Zähl-Rollen zwischen beiden; ScorerChanged erzeugt `scorer_changed`. Test 420.
+
+## 0.7.0: Einladungen und Gastnamen
+
+Pläne: [docs/plan-einladungen.md](../docs/plan-einladungen.md) §3.5 und [docs/plan-0.6.4.md](../docs/plan-0.6.4.md) §3.
+
+| Migration | Inhalt | Tests |
+|---|---|---|
+| `20261109000100_einladungen.sql` | `preview_invite(p_token)` (Budget `search`, nur lesend): `{status, kind, inviterId, inviterAlias, expiresAt}`, bei `claim_player` + `ok` zusätzlich `guestName`, `matchCount`; `status` `ok`/`already_friends`/`already_claimed`/`own`/`expired`/`used`/`revoked`, sonst nur `{status: invalid}`. `revoke_invite(p_invite_id)` (Budget `invitation`, nur Ersteller, nur offene Links, sonst `invite_not_found`). `create_invite`: ein offener Claim-Link je Gast (älterer wird widerrufen), höchstens 50 offene Einladungen je Konto (`too_many_open_invites`, Rennen über `lock_sync`). Aufräumjob `advantly-invites-cleanup-v1` (täglich, 30 Tage nach Nutzung, Widerruf bzw. Ablauf). `player_claimed` wird zugestellt, solange der Claim besteht; Nachricht `{v, kind, profileId, playerId}` | 510, `510_einladungen_concurrency.py`, 410, 181, 170 |
+| `20261109000200_gastnamen_erhalten.sql` | Kontolöschung: fremde, mit dem Konto verknüpfte Gäste (Zuordnung oder Claim) werden vor der Redaktion entkoppelt und behalten ihren Namen (Job Phase A und `purge_account`, gleicher Endzustand); direkte Plätze, Self und eigene freie Gäste bleiben „Gelöschter Spieler“, eigene zugeordnete Gäste gehen weiter an die Dritten über. `admin_redact_guest_name` (siehe K4/K5) | 470, 520, 080, 290, `510_einladungen_concurrency.py`; 220/240/250 prüfen die Redaktionsmechanik mit abgeschalteter Entkopplung |
