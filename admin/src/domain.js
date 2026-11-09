@@ -106,6 +106,17 @@ export function buildAccountAction(account, action, fields) {
   return Object.freeze({ rpc, args: Object.freeze(args) });
 }
 
+// Gastname redigieren (Widerspruch bzw. Löschung nach Art. 21/17): Spieler-UUID und Begründung Pflicht. Der Server prüft
+// admin und AAL2 erneut, redigiert über den Redaktionspfad und schreibt das Audit ohne Gastnamen.
+export function buildGuestRedaction(fields) {
+  const playerId = String(fields?.playerId ?? "").trim().toLowerCase();
+  if (!isUuid(playerId)) throw new SupportError("guest-player-invalid");
+  const reason = String(fields?.reason ?? "").trim();
+  if (!reason) throw new SupportError("update-reason-required");
+  if (Array.from(reason).length > 500) throw new SupportError("update-reason-too-long");
+  return Object.freeze({ rpc: "admin_redact_guest_name", args: Object.freeze({ p_player_id: playerId, p_reason: reason }) });
+}
+
 export function createRequestEpoch() {
   let current = 0;
   return Object.freeze({
@@ -150,6 +161,7 @@ export function mapSafeError(error) {
     "device_not_revoked",
     "account_suspended",
     "account_deletion_pending",
+    "player_not_found",
   ]);
   const candidates = [error?.code, error?.message];
   for (const candidate of candidates) {
