@@ -155,6 +155,20 @@ fun AdvantlyApp(
             navigator.tab = AppTab.Friends
         }
     }
+    // Empfangener Einladungslink: Freunde-Tab, dort erscheint die Vorschau (bzw. nach der Anmeldung).
+    val invitePending =
+        authModel
+            ?.invitations
+            ?.state
+            ?.collectAsState()
+            ?.value
+            ?.pending == true
+    LaunchedEffect(invitePending) {
+        if (invitePending) {
+            navigator.stack.clear()
+            navigator.tab = AppTab.Friends
+        }
+    }
     // App wieder im Vordergrund: Stand der Uhr neu prüfen (Uhr-App evtl. inzwischen installiert/geöffnet)
     LifecycleResumeEffect(model) {
         model.live.refreshWatchStatus()
@@ -513,6 +527,7 @@ private fun TabLayer(
                                 notifications = notifications,
                                 link = pushTarget,
                                 onLinkHandled = onPushTargetHandled,
+                                invitations = authModel?.invitations,
                             )
                         }
                     }
@@ -532,6 +547,7 @@ private fun TabLayer(
                             onRestorePrevious = onRestorePrevious,
                             onShareExport = onShareExport,
                             notifications = notifications,
+                            onShareText = onShareText,
                         )
                     }
                 }
