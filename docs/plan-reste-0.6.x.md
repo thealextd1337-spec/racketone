@@ -16,6 +16,8 @@
 
 Empfehlung: R1–R3 und R5 sofort, R6 als kleiner PR, R4 nach Auftrag.
 
+> **Stand 2026-11-09:** B1 = (b) umgesetzt – Gastname (0.6.5) und Einladungen gemeinsam in 0.7.0 mit PRIVACY 10.
+
 ## 2. Abstimmung zwischen den Plänen
 
 ### 2.1 Datenschutzerklärung und Nutzungsbedingungen

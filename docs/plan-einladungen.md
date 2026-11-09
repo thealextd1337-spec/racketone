@@ -1,6 +1,6 @@
 # Plan Einladungen: Freund per QR-Code oder Link, Gast übernimmt sich selbst
 
-> Status: Entwurf 2026-11-04 · Bezug: PLAN P2 („Freundschaften per Suche, QR und Einladungslink“, „Gäste-Claim per Link“),
+> Status: **umgesetzt in 0.7.0 (Build 18), 2026-11-09** – Abnahmestand §9 · Entwurf 2026-11-04 · Bezug: PLAN P2 („Freundschaften per Suche, QR und Einladungslink“, „Gäste-Claim per Link“),
 > p2-plan P2-D/P2-F, 03 §6.1/§6.3, 0.6.3 §3.5 (Gast mit Freund verknüpfen), 0.6.5 (`plan-0.6.4.md`, Kontolöschung des
 > verknüpften Freundes) · Vorschlag Version 0.7.0, nächster freier Build nach 0.6.4 (Build 17) bzw. 0.6.5
 > · Überarbeitet nach Review (Fable, Astra): QR über Plattform-Bibliotheken, nur Fragment-Link, Token-Lebenszyklus,
@@ -540,3 +540,14 @@ Später, eigene Releases: Install-Referrer (falls der Feldtest Hänger zeigt, E6
 | E11 | Inhalt der Claim-Vorschau | Alias des Anlegers, Gastname und Anzahl der Matches. Keine Mitspielernamen und keine Ergebnisse vor dem Annehmen. |
 | E12 | Aufbewahrung von Einladungen | **30 Tage** nach Ablauf bzw. Nutzung löschen (S7), so in die Datenschutzerklärung. |
 | E13 | Versionsnummer | 0.7.0 (nächster freier Build) nach 0.6.4/0.6.5, weil es ein neues Feature mit neuer Datenschutz-Fassung ist. |
+
+## 9. Abnahmestand 0.7.0 (2026-11-09)
+
+| Teil | Stand |
+|---|---|
+| Server S1, S2, S5–S8 | Migration `20261109000100_einladungen.sql`; pgTAP 510 + Renntest `510_einladungen_concurrency.py` grün (lokal, Embedded-Postgres 17); Push `player_claimed` mit `playerId` in `push-dispatch` |
+| Rennsicherheit S6 | über die globale `lock_sync` aller Einladungs-RPCs; Renntest: von vier parallelen Aufrufen ab 48 offenen gelingen genau zwei |
+| App | `InvitesPort`, Parser (nur Fragment-Link bzw. roher Token), `InvitationsViewModel` mit `SavedStateHandle`, QR per zxing (Android/Desktop) bzw. CoreImage (iOS), App-Link-Filter mit `autoVerify`, DE/EN; `gradlew check` + Debug-Builds grün |
+| E4 In-App-Scanner | **nicht gebaut** – Systemkamera öffnet den App Link; kein ML Kit, keine Kamera-Berechtigung, Datensicherheit unverändert |
+| Website | `site/i/`, `site/.well-known/assetlinks.json` (nur Upload-Key), PRIVACY 10 DE/EN; Katalogeintrag erst mit App-Rollout (`play-console.md`) |
+| **Offen** | SHA-256 des Play-App-Signaturschlüssels in `assetlinks.json`; iOS-QR (`CIQRCodeGenerator`) nur kompiliert, nicht ausgeführt (macOS-CI); `170_cloud_device_binding_live.py` und pg_cron-Test nur in CI; Gerätetests §6 (App-Link-Verifikation, WhatsApp, Pixel-Kamera, Feldtest zwei Konten) |
