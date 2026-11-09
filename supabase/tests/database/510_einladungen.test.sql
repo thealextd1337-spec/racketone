@@ -3,7 +3,7 @@
 -- Aufräumjob S7, Push player_claimed S8, Rechte und Cloud-Bindung. redeem_invite bleibt unverändert (490).
 begin;
 set local timezone = 'UTC';
-select plan(65);
+select plan(66);
 select tests.world();
 select tests.publish_consent_documents('ei-510');
 select tests.accept_current_consents(id) from tests.users;
@@ -222,6 +222,17 @@ insert into public.invites (token_hash, kind, created_by, expires_at, used_at, r
          (sha256('\x05'::bytea), 'friend', tests.uid('alice'), now() - interval '31 days', null, null, now() - interval '40 days'),
          (sha256('\x06'::bytea), 'friend', tests.uid('alice'), now() - interval '29 days', null, null, now() - interval '40 days'),
          (sha256('\x07'::bytea), 'friend', tests.uid('alice'), now() + interval '1 day', null, null, now() - interval '40 days');
+create function pg_temp.invites_cron() returns boolean language plpgsql as $$
+declare v_ok boolean;
+begin
+  execute $q$select count(*) = 1 and bool_and(active) from cron.job where jobname = 'advantly-invites-cleanup-v1'
+    and schedule = '37 3 * * *' and command = 'select private.purge_invites();'$q$ into v_ok;
+  return v_ok;
+end;
+$$;
+select case when exists (select 1 from pg_extension where extname = 'pg_cron')
+  then ok(pg_temp.invites_cron(), 'Cronjob advantly-invites-cleanup-v1 täglich')
+  else skip('pg_cron fehlt: Planung im Supabase-Stack nachweisen') end;
 select lives_ok($$select private.purge_invites()$$, 'purge_invites läuft');
 select is((select array_agg(get_byte(token_hash, 0) order by token_hash) from public.invites),
   (select array_agg(get_byte(sha256(x), 0) order by sha256(x)) from unnest(array['\x02'::bytea, '\x04', '\x06', '\x07']) x),
