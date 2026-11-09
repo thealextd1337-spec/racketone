@@ -253,6 +253,28 @@ Pfad: **Richtlinien → App-Inhalte**. Alle Punkte müssen vor dem geschlossenen
   update private.consent_versions set approved_at = now() where (document_type, version) = ('PRIVACY', '9');
   commit;
   ```
+  **0.7.0 (Datenschutzerklärung Version 10, Einladungslinks/QR, Gast übernehmen, Gastname bei Kontolöschung):** nur PRIVACY
+  wechselt, TERMS 2 bleibt. Vorher prüfen, dass PRIVACY 9 aktuell ist. Reihenfolge: Migrationen `20261109000100`/`0200`
+  auf staging (Edge Function `push-dispatch` neu ausrollen, wegen `playerId`), Merge, Seite live (inkl.
+  `.well-known/assetlinks.json` und `/i/`, **vor** dem App-Rollout, weil Android beim Installieren verifiziert), App 0.7.0
+  ausrollen (Phone + Wear aus einem Commit), dann freigeben und `is_current` prüfen.
+  ```sql
+  begin;
+  update private.consent_versions set is_current = false where document_type = 'PRIVACY' and is_current;
+  insert into private.consent_versions(document_type, version, is_current) values ('PRIVACY', '10', true);
+  insert into private.consent_translations(document_type, version, language, url) values
+    ('PRIVACY', '10', 'de', 'https://advantly.eu/app-datenschutz.html'),
+    ('PRIVACY', '10', 'en', 'https://advantly.eu/en/app-privacy.html');
+  update private.consent_versions set approved_at = now() where (document_type, version) = ('PRIVACY', '10');
+  commit;
+  ```
+  **App Links (ab 0.7.0):** `site/.well-known/assetlinks.json` enthält bisher nur den SHA-256 des **Upload-Keys** (§2,
+  gegen das 0.6.4-AAB geprüft). Der SHA-256 des **App-Signaturschlüssels** fehlt noch: Play Console → Testen und
+  veröffentlichen → App-Integrität → App-Signatur → „SHA-256-Zertifikatfingerabdruck“ kopieren und als zweiten Eintrag in
+  `sha256_cert_fingerprints` ergänzen. Ohne ihn verifiziert Android Play-Installationen **nicht**; Links öffnen dann die
+  Fallback-Seite `/i/` (Einfügen in „Freund hinzufügen“ funktioniert trotzdem). Prüfen mit
+  `https://digitalassetlinks.googleapis.com/v1/statements:list?source.web.site=https://advantly.eu&relation=delegate_permission/common.handle_all_urls`
+  und am Gerät `adb shell pm get-app-links eu.advantly` (Play-Installation, nicht seitenladen).
   Voraussetzung: Migration `20261018000200_consent_versions.sql` ist auf dem Projekt (Release-Gate).
 
 ### 6.2 App-Zugriff
@@ -340,6 +362,9 @@ optional?“ → **Nein**). Optional bleiben nur Support-Meldungen und die per H
   (Google-Login), weiterhin „Nutzername und andere Authentifizierung“ (E-Mail-Code). Die Einstellung „Puls & Schritte“ ist eine
   Präferenz, keine Gesundheitsinfo; Puls- und Schrittwerte bleiben **nicht erhoben**.
 - **Neu ausfüllen, sobald** Push, Live-Zuschauer oder Health-Daten in der Cloud dazukommen.
+- **0.7.0 (Einladungslinks, QR, Gast übernehmen):** keine neue Datenart. Einladungen (Hash, Art, Ablauf, Einlöser) fallen
+  unter Nutzer-IDs/Freundesliste, Gastnamen unter Name. Kein In-App-Scanner (kein ML Kit), keine Kamera-Berechtigung: QR wird
+  mit der System-Kamera gescannt. Formular bleibt unverändert.
   In P3 kommen Puls und kcal dazu, sobald sie in die Cloud **synchronisiert** werden („Gesundheitsinfo/Fitness-Info“, Zweck App-Funktionalität, nicht geteilt).
   **Rein lokales Speichern** von Puls oder kcal auf Uhr bzw. Handy ist **keine** Erhebung.
   Ob das Schreiben nach Health Connect auf demselben Gerät eine Angabe auslöst, vor P3 prüfen. Unabhängig davon ist Health Connect eigens zu deklarieren (§6.7).

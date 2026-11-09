@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "eu.advantly",
+      "sha256_cert_fingerprints": [
+        "B6:CC:1A:07:EB:C7:91:39:8B:92:CD:AF:B2:A3:12:61:7E:89:DA:F0:E9:E9:BC:92:EB:AB:8B:FE:32:21:D0:64"
+      ]
+    }
+  }
+]
