@@ -199,5 +199,25 @@ def main():
                                   (document, version))
 
 
+@contextmanager
+def legacy_linked_guest_redaction():
+    """0.7.0 (20261109000200): Mit dem gelöschten Konto verknüpfte fremde Gäste werden entkoppelt statt redigiert
+    (neues Verhalten: pgTAP 470/520, 510_einladungen_concurrency.py). Diese Rennen prüfen die unveränderte
+    Redaktionsmechanik weiter mit solchen Gästen als Fixture; die Entkopplung ist dafür nur während des Laufs
+    abgeschaltet und wird danach exakt wiederhergestellt."""
+    params = import_module("170_cloud_device_binding_live").local_connection_parameters(
+        os.environ["ADVANTLY_LIFECYCLE_TEST_DB_URL"])
+    with psycopg.connect(**params, autocommit=True) as connection:
+        original = connection.execute(
+            "select pg_get_functiondef('private.release_linked_guests(uuid)'::regprocedure)").fetchone()[0]
+        connection.execute("create or replace function private.release_linked_guests(p_profile uuid) returns void "
+                           "language plpgsql as $$ begin null; end $$")
+        try:
+            yield
+        finally:
+            connection.execute(original)
+
+
 if __name__ == "__main__":
-    main()
+    with legacy_linked_guest_redaction():
+        main()

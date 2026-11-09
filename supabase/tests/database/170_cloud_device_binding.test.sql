@@ -44,6 +44,8 @@ insert into cloud_reads values
   ($q$select public.tournament_overview('17300000-0000-4000-8000-000000000001')$q$),
   ($q$select * from public.find_profile('missing')$q$),
   ($q$select public.send_friend_request('17500000-0000-4000-8000-000000000001')$q$),
+  ($q$select public.preview_invite(repeat('0',64))$q$),
+  ($q$select public.revoke_invite('17500000-0000-4000-8000-000000000001')$q$),
   ($q$select public.register_device('17200000-0000-4000-8000-000000000099','phone','android')$q$);
 grant select on cloud_reads to authenticated;
 

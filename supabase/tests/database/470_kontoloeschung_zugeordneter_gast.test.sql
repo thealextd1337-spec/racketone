@@ -1,11 +1,11 @@
--- Plan 0.6.3 §3.6: Gast des Anlegers einem Freund zugeordnet, der Freund löscht sein Konto (regulärer Weg:
--- request_account_deletion, Karenz abgelaufen, gestaffelter Job wie in 290). Beim Anleger bleibt das Match mit
--- Ergebnis und Projektion, der Platz heißt „Gelöschter Spieler“, der Gast ist entknüpft und lässt sich nicht erneut
--- zuordnen. Hält nur das heutige Verhalten fest, keine neue Fachlogik.
+-- Plan 0.6.3 §3.6 und 0.6.5 §4 (0.7.0, 20261109000200): Gast des Anlegers einem Freund zugeordnet bzw. von ihm per
+-- Link beansprucht, der Freund löscht sein Konto (regulärer Weg: request_account_deletion, Karenz abgelaufen,
+-- gestaffelter Job wie in 290). Beim Anleger bleibt das Match mit Ergebnis und Projektion; der Gast wird wieder ein
+-- unverknüpfter Gast mit seinem Namen (keine Redaktion) und lässt sich erneut zuordnen bzw. beanspruchen.
 begin;
 set local timezone = 'UTC';
 set local transaction_timeout = '5min';
-select plan(17);
+select plan(22);
 select tests.world();
 select tests.publish_consent_documents('kl-470');
 select tests.accept_current_consents(id) from tests.users;
@@ -33,12 +33,16 @@ select tests.authenticate_as('alice');
 select is(tests.result(public.sync_push(jsonb_build_object(
   'players', jsonb_build_array(
     jsonb_build_object('id', '47100000-0000-4000-8000-000000000001', 'kind', 'self', 'displayName', 'Ich'),
-    jsonb_build_object('id', '47100000-0000-4000-8000-000000000002', 'kind', 'guest', 'displayName', 'Test1')),
+    jsonb_build_object('id', '47100000-0000-4000-8000-000000000002', 'kind', 'guest', 'displayName', 'Test1'),
+    jsonb_build_object('id', '47100000-0000-4000-8000-000000000003', 'kind', 'guest', 'displayName', 'Test2')),
   'matches', jsonb_build_array(tests.match('47000000-0000-4000-8000-000000000001', jsonb_build_array(
     tests.part('47100000-0000-4000-8000-000000000001', 'A', 1, 'Alice', null, '47100000-0000-4000-8000-000000000001'),
     tests.part('47100000-0000-4000-8000-000000000002', 'B', 1, 'Test1', null, '47100000-0000-4000-8000-000000000002')),
     jsonb_build_object('projection', jsonb_build_object('status', 'finished', 'winner', 'A',
-      'endedAt', '2026-11-04T11:00:00Z', 'summary', '{"sets":[[6,4],[6,3]]}'::jsonb, 'eventCount', 3)))),
+      'endedAt', '2026-11-04T11:00:00Z', 'summary', '{"sets":[[6,4],[6,3]]}'::jsonb, 'eventCount', 3))),
+    tests.match('47000000-0000-4000-8000-000000000002', jsonb_build_array(
+      tests.part('47100000-0000-4000-8000-000000000001', 'A', 1, 'Alice', null, '47100000-0000-4000-8000-000000000001'),
+      tests.part('47100000-0000-4000-8000-000000000003', 'B', 1, 'Test2', null, '47100000-0000-4000-8000-000000000003')))),
   'events', jsonb_build_array(
     tests.event('47200000-0000-4000-8000-000000000001', '47000000-0000-4000-8000-000000000001', tests.device('a1'), 1, 'MatchCreated'),
     tests.event('47200000-0000-4000-8000-000000000002', '47000000-0000-4000-8000-000000000001', tests.device('a1'), 2, 'PlayerAssigned',
@@ -56,9 +60,15 @@ select is(pg_temp.as_user('alice', $$select public.assign_player('47100000-0000-
 select results_eq($$select link_status, profile_id = tests.uid('vera') from public.match_participants
   where match_id = '47000000-0000-4000-8000-000000000001' and slot_id = '47100000-0000-4000-8000-000000000002'$$,
   $$values ('assigned'::text, true)$$, 'Platz mit veras Konto verknüpft');
+-- Test2 beansprucht vera per Einladungslink.
+select set_config('tests.claim', pg_temp.as_user('alice',
+  $$select public.create_invite('claim_player', '47100000-0000-4000-8000-000000000003')$$), true);
+select is(pg_temp.as_user('vera', format('select public.redeem_invite(%L) ->> %L', current_setting('tests.claim'), 'matchCount')),
+  '1', 'Test2 → von vera beansprucht, ein Match');
 create temp table before_deletion as
   select pg_temp.result_of('47000000-0000-4000-8000-000000000001') result,
     (select redaction_epoch from public.matches where id = '47000000-0000-4000-8000-000000000001') epoch,
+    (select redaction_epoch from public.matches where id = '47000000-0000-4000-8000-000000000002') epoch2,
     (select display_name || '/' || link_status from public.match_participants
       where match_id = '47000000-0000-4000-8000-000000000001' and slot_id = '47100000-0000-4000-8000-000000000001') own_slot;
 
@@ -81,27 +91,60 @@ select is(pg_temp.result_of('47000000-0000-4000-8000-000000000001'), (select res
 select is(pg_temp.as_user('alice', $$select count(*)::text from public.matches where id = '47000000-0000-4000-8000-000000000001'$$),
   '1', 'alice sieht das Match weiter');
 select results_eq($$select display_name, deleted_profile, profile_id is null, link_status is null from public.match_participants
-  where match_id = '47000000-0000-4000-8000-000000000001' and slot_id = '47100000-0000-4000-8000-000000000002'$$,
-  $$values ('Gelöschter Spieler'::text, true, true, true)$$, 'Platz heißt „Gelöschter Spieler“ mit deleted_profile');
+  where slot_id in ('47100000-0000-4000-8000-000000000002', '47100000-0000-4000-8000-000000000003') order by slot_id$$,
+  $$values ('Test1'::text, false, true, true), ('Test2'::text, false, true, true)$$,
+  'Plätze tragen weiter die Gastnamen, entkoppelt, ohne deleted_profile');
 select is((select display_name || '/' || link_status from public.match_participants
   where match_id = '47000000-0000-4000-8000-000000000001' and slot_id = '47100000-0000-4000-8000-000000000001'),
   (select own_slot from before_deletion), 'Eigener Platz von alice unverändert');
-select results_eq($$select profile_id is null, display_name from public.players where id = '47100000-0000-4000-8000-000000000002'$$,
-  $$values (true, 'Gelöschter Spieler'::text)$$, 'players.profile_id leer, Gastname nicht wieder „Test1“');
+select results_eq($$select display_name, profile_id is null, assigned_by is null, assignment_source is null from public.players
+  where id in ('47100000-0000-4000-8000-000000000002', '47100000-0000-4000-8000-000000000003') order by id$$,
+  $$values ('Test1'::text, true, true, true), ('Test2'::text, true, true, true)$$,
+  'players: Namen bleiben, Verknüpfung (Zuordnung und Claim) geleert');
 select is(pg_temp.as_user('alice', $$select string_agg(e."payload" -> 'player' ->> 'displayName' || '/' || e."redacted"::text, ',')
   from public.pull_match_events('47000000-0000-4000-8000-000000000001') e where e."type" = 'PlayerAssigned'$$),
-  'Gelöschter Spieler/true', 'Klarname im Event-Payload redigiert');
+  'Test1/false', 'PlayerAssigned-Payload bleibt unverändert');
 select ok((select redaction_epoch from public.matches where id = '47000000-0000-4000-8000-000000000001')
-  > (select epoch from before_deletion), 'Redaktionsepoche gestiegen (Clients laden neu)');
-select ok(pg_temp.as_user('alice', $$select public.sync_pull(0)::text$$) !~ 'Test1', 'Gastname taucht im Pull von alice nicht auf');
+  > (select epoch from before_deletion)
+  and (select redaction_epoch from public.matches where id = '47000000-0000-4000-8000-000000000002')
+  > (select epoch2 from before_deletion), 'Epoche beider Matches gestiegen (Clients laden neu)');
+select ok(pg_temp.as_user('alice', $$select public.sync_pull(0)::text$$) ~ 'Test1', 'Gastname kommt im Pull von alice an');
+select is((select count(*)::int from private.match_redacted_players
+  where player_id in ('47100000-0000-4000-8000-000000000002', '47100000-0000-4000-8000-000000000003'))
+  + (select count(*)::int from private.redacted_player_identities
+  where player_id in ('47100000-0000-4000-8000-000000000002', '47100000-0000-4000-8000-000000000003'))
+  + (select count(*)::int from private.player_write_redactions
+  where player_id in ('47100000-0000-4000-8000-000000000002', '47100000-0000-4000-8000-000000000003'))
+  + (select count(*)::int from private.match_redacted_slots
+  where slot_id in ('47100000-0000-4000-8000-000000000002', '47100000-0000-4000-8000-000000000003'))
+  + (select count(*)::int from private.match_redacted_names
+  where identity_id in ('47100000-0000-4000-8000-000000000002', '47100000-0000-4000-8000-000000000003')), 0,
+  'Gäste weder im Manifest noch schreibgesperrt noch redigiert');
+select is(pg_temp.as_user('alice', $$select (public.cloud_pull_match_redaction_v1('47000000-0000-4000-8000-000000000001',
+    (select visibility_epoch from public.profile_settings where profile_id = auth.uid()),
+    (select redaction_epoch from public.matches where id = '47000000-0000-4000-8000-000000000001')) -> 'redactedPlayerIds')::text$$),
+  '[]', 'Redaktionsliste des Matches leer');
 
--- Erneute Zuordnung desselben Gasts: abgelehnt, an einen anderen Freund wie an niemanden.
+-- Erneut verknüpfbar: Test1 an bob, Test2 per neuem Claim-Link.
 select is(pg_temp.as_user('alice', $$select public.assign_player('47100000-0000-4000-8000-000000000002', tests.uid('bob'))::text$$),
-  'ERR P0001 player_redacted', 'Erneute Zuordnung des Gasts abgelehnt');
-select is(pg_temp.as_user('alice', $$select public.create_invite('claim_player', '47100000-0000-4000-8000-000000000002')::text$$),
-  'ERR P0001 player_redacted', 'Gast auch nicht per Einladung beanspruchbar');
-select is((select count(*)::int from public.match_participants
-  where match_id = '47000000-0000-4000-8000-000000000001' and profile_id is not null and slot_id = '47100000-0000-4000-8000-000000000002'),
-  0, 'Platz bleibt unverknüpft');
+  '1', 'Test1 lässt sich bob zuordnen');
+select ok(pg_temp.as_user('alice', $$select public.create_invite('claim_player', '47100000-0000-4000-8000-000000000003')$$)
+  ~ '^[0-9a-f]{64}$', 'Test2 lässt sich wieder per Link beanspruchen');
+select results_eq($$select display_name, profile_id = tests.uid('bob'), link_status from public.match_participants
+  where match_id = '47000000-0000-4000-8000-000000000001' and slot_id = '47100000-0000-4000-8000-000000000002'$$,
+  $$values ('Test1'::text, true, 'assigned'::text)$$, 'Platz mit bob verknüpft, Name Test1');
+-- Späterer Upload desselben Matches durch alice (mit Lebenszyklusbeleg der neuen Epoche) bleibt beim Gastnamen.
+select set_config('tests.batch', jsonb_build_object('matches', jsonb_build_array(
+  tests.match('47000000-0000-4000-8000-000000000002', jsonb_build_array(
+    tests.part('47100000-0000-4000-8000-000000000001', 'A', 1, 'Alice', null, '47100000-0000-4000-8000-000000000001'),
+    tests.part('47100000-0000-4000-8000-000000000003', 'B', 1, 'Test2', null, '47100000-0000-4000-8000-000000000003')))),
+  'lifecycle', jsonb_build_object(
+    'generation', (select visibility_epoch from public.profile_settings where profile_id = tests.uid('alice')),
+    'redactionEpochs', (select jsonb_object_agg(id::text, redaction_epoch) from public.matches)))::text, true);
+select is(pg_temp.as_user('alice', $$select tests.result(public.sync_push(current_setting('tests.batch')::jsonb), 'matches', 0)$$),
+  'updated', 'alice lädt das Claim-Match erneut hoch');
+select results_eq($$select display_name, deleted_profile, profile_id is null from public.match_participants
+  where match_id = '47000000-0000-4000-8000-000000000002' and slot_id = '47100000-0000-4000-8000-000000000003'$$,
+  $$values ('Test2'::text, false, true)$$, 'Nach erneutem Upload weiter Test2, kein Schreibschutz');
 select * from finish();
 rollback;

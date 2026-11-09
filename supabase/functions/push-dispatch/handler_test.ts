@@ -116,6 +116,42 @@ Deno.test("dispatch sends data-only strings and acknowledges every entry with it
   assert(log.length === 2, "partial batch ends the run");
 });
 
+Deno.test("dispatch forwards the guest id of player_claimed and drops unknown keys", async () => {
+  const log: unknown[] = [];
+  const sent: Record<string, string>[] = [];
+  const send: Send = (_token, data) => {
+    sent.push(data);
+    return Promise.resolve("sent");
+  };
+  // Vertrag aus 20261109000100_einladungen.sql: Art, Einlöser (profileId) und Gast (playerId), keine Namen.
+  const claimed = {
+    id: 7,
+    message: {
+      v: 1,
+      kind: "player_claimed",
+      profileId: "p-1",
+      playerId: "g-1",
+      displayName: "Test1",
+    },
+    targets: [{ deviceId: "d7", provider: "fcm", token: "t7" }],
+  };
+  const response = await handler(
+    () => fakeBackend([[claimed]], log),
+    () => secret,
+    () => send,
+  )(req());
+  assert(response.status === 200);
+  assert(
+    JSON.stringify(sent) ===
+      JSON.stringify([{
+        v: "1",
+        kind: "player_claimed",
+        profileId: "p-1",
+        playerId: "g-1",
+      }]),
+  );
+});
+
 Deno.test("dispatch claims again after a full batch and stops at the time budget", async () => {
   const full = Array.from({ length: BATCH_LIMIT }, (_, i) => entry(i));
   const log: unknown[] = [];
