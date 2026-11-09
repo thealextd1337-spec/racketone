@@ -19,6 +19,7 @@ import eu.advantly.android.R
 import eu.advantly.android.sync.AndroidPhoneSyncRecord
 import eu.advantly.android.sync.AndroidPhoneSyncScheduler
 import eu.advantly.cloud.sync.pulledFriendships
+import eu.advantly.core.model.PlayerId
 import eu.advantly.data.AndroidInstallationGuard
 import eu.advantly.match.session.AndroidMatchSessions
 import eu.advantly.presentation.push.FriendsSection
@@ -136,11 +137,12 @@ internal fun ensurePushChannels(context: Context) {
     }
 }
 
-/** Lokaler Text: mit Alias aus dem Freundes-Cache, sonst neutral. */
+/** Lokaler Text: mit Alias aus dem Freundes-Cache (bei [PushKind.PLAYER_CLAIMED] zusätzlich Gastname), sonst neutral. */
 internal fun pushText(
     context: Context,
     message: PushMessage,
     name: String?,
+    guest: String? = null,
 ): String {
     val (named, neutral) =
         when (message.kind) {
@@ -152,8 +154,10 @@ internal fun pushText(
             PushKind.SCORER_INVITED -> R.string.push_scorer_invited to R.string.push_scorer_invited_neutral
             PushKind.SCORER_RESPONDED -> R.string.push_scorer_responded to R.string.push_scorer_responded_neutral
             PushKind.SCORER_CHANGED -> R.string.push_scorer_changed to R.string.push_scorer_changed_neutral
+            PushKind.PLAYER_CLAIMED -> R.string.push_player_claimed to R.string.push_player_claimed_neutral
         }
-    return name?.trim()?.takeIf { it.isNotEmpty() }?.let { context.getString(named, it) } ?: context.getString(neutral)
+    val args = (if (message.kind == PushKind.PLAYER_CLAIMED) listOf(name, guest) else listOf(name)).map { it?.trim().orEmpty() }
+    return if (args.all { it.isNotEmpty() }) context.getString(named, *args.toTypedArray()) else context.getString(neutral)
 }
 
 /**
@@ -164,6 +168,7 @@ internal fun showPush(
     context: Context,
     message: PushMessage,
     name: String?,
+    guest: String? = null,
 ) {
     if (Build.VERSION.SDK_INT >= 33 &&
         context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -182,7 +187,7 @@ internal fun showPush(
         android.app.Notification
             .Builder(context, message.kind.channel.id())
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(pushText(context, message, name))
+            .setContentTitle(pushText(context, message, name, guest))
             .setContentText(context.getString(R.string.push_open))
             .setAutoCancel(true)
             .setCategory(android.app.Notification.CATEGORY_SOCIAL)
@@ -207,7 +212,7 @@ internal fun deliverPush(
         message.profileId?.let { actor ->
             local?.let { (_, friends) -> friends[actor] }
         }
-    showPush(app, message, name)
+    showPush(app, message, name, message.playerId?.let { guestName(app, it) })
     local?.first?.let { syncSoon(app, it) }
 }
 
@@ -225,6 +230,23 @@ internal fun syncSoon(
     app: Context,
     profile: String,
 ) = AndroidPhoneSyncScheduler(app).scheduleUnlessBackingOff(profile, AndroidPhoneSyncRecord(app), 0)
+
+/** Name des eigenen Gasts [playerId] aus der lokalen Datenbank (der Push trägt nur IDs); `null` wenn unbekannt. */
+private fun guestName(
+    app: Context,
+    playerId: String,
+): String? {
+    if ((app as? AdvantlyPhoneApplication)?.bootstrap() != true) return null
+    return AndroidInstallationGuard
+        .storage(app) {
+            AndroidMatchSessions
+                .get(app, PeerKind.PHONE)
+                .data.players
+                .get(PlayerId(playerId))
+                ?.displayName
+                .orEmpty()
+        }?.takeIf { it.isNotBlank() }
+}
 
 /** Lokales Konto und Aliase der Freunde; `null` ohne geprüfte Installation oder ohne Konto. */
 private fun localAccount(app: Context): Pair<String, Map<String, String?>>? {

@@ -42,7 +42,7 @@ class PushNotificationsTest {
     private val context: Application = RuntimeEnvironment.getApplication()
     private val manager = context.getSystemService(NotificationManager::class.java)
 
-    private fun texts(name: String?) = PushKind.entries.map { pushText(context, PushMessage(it, MATCH, ALEX), name) }
+    private fun texts(name: String?) = PushKind.entries.map { pushText(context, PushMessage(it, MATCH, ALEX), name, guest = "Test1") }
 
     @Test fun textsUseTheLocalAliasOrStayNeutralInBothLanguages() {
         val english = texts("Alex")
@@ -57,6 +57,18 @@ class PushNotificationsTest {
         assertEquals("Alex hat dich in ein Match eingetragen", texts("Alex")[PushKind.PLAYER_ASSIGNED.ordinal])
         assertEquals("Du hast eine neue Freundschaftsanfrage", texts(null)[0])
         assertTrue(texts(null).none { it.contains("Alex") })
+    }
+
+    /** plan-einladungen E8: Einlöser-Alias und lokaler Gastname; fehlt einer, bleibt der Text neutral. */
+    @Test fun playerClaimedNamesClaimerAndGuestOrStaysNeutral() {
+        val claimed = PushMessage(PushKind.PLAYER_CLAIMED, profileId = ALEX, playerId = MATCH)
+        assertEquals("Anja took over Test1", pushText(context, claimed, "Anja", "Test1"))
+        assertEquals("A guest was taken over", pushText(context, claimed, "Anja", null))
+        assertEquals("A guest was taken over", pushText(context, claimed, null, "Test1"))
+        assertEquals(PushTarget(FriendsSection.FRIENDS), claimed.target)
+        RuntimeEnvironment.setQualifiers("de")
+        assertEquals("Anja hat Test1 übernommen", pushText(context, claimed, "Anja", "Test1"))
+        assertEquals("Ein Gast wurde übernommen", pushText(context, claimed, " ", "Test1"))
     }
 
     @Test fun oneChannelPerCategoryScoringAsHeadsUp() {
