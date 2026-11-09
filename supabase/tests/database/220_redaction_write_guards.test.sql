@@ -1,6 +1,13 @@
 -- Servergrenze: echte Owner-Uploads nach K3, ohne neuen Client-/Releasevertrag.
 begin;
 select plan(1326);
+-- 0.7.0 (20261109000200): Mit dem gelöschten Konto verknüpfte fremde Gäste werden bei der Kontolöschung entkoppelt
+-- statt redigiert (neues Verhalten: 470/520). Diese Datei prüft die unveränderte Redaktionsmechanik für pensionierte
+-- Spieler-IDs weiter mit solchen Gästen als Fixture und schaltet die Entkopplung dazu transaktionslokal ab.
+create or replace function private.release_linked_guests(p_profile uuid) returns void language plpgsql as $$
+begin
+  null;
+end $$;
 select tests.world();
 select tests.publish_consent_documents('redaction-write-220');
 select tests.accept_current_consents(id) from tests.users;

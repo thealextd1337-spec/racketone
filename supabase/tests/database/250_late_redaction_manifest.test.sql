@@ -2,6 +2,13 @@
 -- ERST DANACH lädt ein Gerät neue Matches/Events mit X hoch. Grundlage: Server-Probe late_guest_probe.sql.
 begin;
 select plan(318);
+-- 0.7.0 (20261109000200): Mit dem gelöschten Konto verknüpfte fremde Gäste werden bei der Kontolöschung entkoppelt
+-- statt redigiert (neues Verhalten: 470/520). Diese Datei prüft die unveränderte Redaktionsmechanik für pensionierte
+-- Spieler-IDs weiter mit solchen Gästen als Fixture und schaltet die Entkopplung dazu transaktionslokal ab.
+create or replace function private.release_linked_guests(p_profile uuid) returns void language plpgsql as $$
+begin
+  null;
+end $$;
 select tests.world();
 select tests.publish_consent_documents('late-manifest-250');
 select tests.accept_current_consents(id) from tests.users;
