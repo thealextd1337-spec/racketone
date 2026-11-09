@@ -113,7 +113,8 @@ select lives_ok($$ select public.add_match_visitor('a4100000-0000-7000-8000-0000
 select lives_ok($$ select public.revoke_match_visitor('a4100000-0000-7000-8000-000000000001', tests.uid('carol')) $$,
                 'bob widerruft carol');
 reset role;
-select private.notify(tests.uid('dave'), 'player_claimed', '{}'::jsonb, tests.uid('alice'));
+-- Reine Outbox-Art ohne Push (seit 0.7.0 ist player_claimed eine Push-Art, siehe 510).
+select private.notify(tests.uid('dave'), 'player_assignment_rejected', '{}'::jsonb, tests.uid('alice'));
 insert into ops.notification_outbox (profile_id, kind, payload, actor_id)
   values (tests.uid('bob'), 'friend_accepted', '{}'::jsonb, tests.uid('bob'));
 
@@ -134,7 +135,7 @@ select is((select e -> 'targets' from jsonb_array_elements(current_setting('test
           'Ziele mit Gerät, Anbieter und Token');
 reset role;
 select is((select array_agg(kind || ':' || attempts order by id) from ops.notification_outbox),
-          array['friend_request:1', 'match_shared:1', 'player_claimed:0'],
+          array['friend_request:1', 'match_shared:1', 'player_assignment_rejected:0'],
           'Unzustellbares gelöscht (fremde Anfrage, blockiert, ohne Token, widerrufen, an sich selbst), Rest geleast');
 select ok(not exists (select 1 from ops.notification_outbox where payload ->> 'matchId' = 'a4100000-0000-7000-8000-000000000002'),
           'Erstbackup: match_shared für ein altes Match verworfen');
@@ -211,7 +212,7 @@ update public.devices set last_seen_at = now() - interval '181 days' where id = 
 update public.devices set last_seen_at = now() - interval '179 days' where id = tests.device('c1');
 select lives_ok($$ select private.purge_push_outbox() $$, 'Bereinigung läuft');
 select is((select array_agg(distinct kind order by kind) from ops.notification_outbox),
-          array['friend_accepted', 'match_shared', 'player_claimed'],
+          array['friend_accepted', 'match_shared', 'player_assignment_rejected'],
           'nach 7 Tagen und nach 5 Versuchen gelöscht, Rest bleibt');
 select is((select array_agg(id order by id) from public.devices where push_token is not null),
           array[tests.device('b1'), tests.device('c1')], 'Token ohne Aktivität seit 180 Tagen geleert');

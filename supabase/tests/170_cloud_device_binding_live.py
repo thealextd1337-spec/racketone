@@ -358,6 +358,8 @@ def main():
                 ("my_visitor_matches", {}), ("tournament_overview", {"p_tournament_id": match_id}),
                 ("find_profile", {"p_query": "missing"}),
                 ("send_friend_request", {"p_target": str(other)}),
+                ("preview_invite", {"p_token": "0" * 64}),
+                ("revoke_invite", {"p_invite_id": str(uuid4())}),
                 ("register_device", {"p_id": str(uuid4()), "p_kind": "phone", "p_platform": "android"}),
             ]
             for bad_token, bad_cap in [(token(uid, None), live_cap), (token(uid, uuid4()), live_cap),
