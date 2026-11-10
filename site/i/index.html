@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Einladung / Invitation – Advantly</title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="no-referrer">
+  <!-- Statisch, ohne externe Ressourcen und ohne Tracking. Der Einladungs-Token steht im Fragment (#…),
+       erreicht den Server nie und wird hier weder ausgelesen noch angezeigt (plan-einladungen §3.1). -->
+  <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/style.css">
+  <style>
+    .actions { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0; }
+    button.btn { font: inherit; cursor: pointer; }
+    .status { min-height: 1.6em; }
+    .translation { border-top: 1px solid var(--surface-2); margin-top: 40px; padding-top: 32px; }
+  </style>
+</head>
+<body>
+  <main class="legal">
+    <div class="wrap">
+      <section lang="de" aria-labelledby="de-title">
+        <h1 id="de-title">Du wurdest zu Advantly eingeladen</h1>
+        <p>Mit Advantly zählst du Racketsport-Matches auf Handy und Uhr und teilst sie mit Freunden.</p>
+        <ol>
+          <li>Advantly auf deinem Android-Handy installieren.</li>
+          <li>Konto anlegen bzw. anmelden.</li>
+          <li>Diesen Link danach noch einmal antippen. Die App zeigt dir, wer dich eingeladen hat, und du entscheidest.</li>
+        </ol>
+        <div class="actions">
+          <a class="btn btn-primary" href="https://play.google.com/store/apps/details?id=eu.advantly" rel="noreferrer">Bei Google Play laden</a>
+          <button class="btn btn-ghost" type="button" data-copy="de">Link kopieren</button>
+        </div>
+        <p id="status-de" class="status" role="status" aria-live="polite"></p>
+        <p>Öffnet sich der Link nicht in der App, kopiere ihn und füge ihn in Advantly unter „Freund hinzufügen“ ein.</p>
+        <p class="note">Während des Pilots nur für eingeladene Tester. Stehst du nicht auf der Testerliste, zeigt Google Play die App als nicht verfügbar an.</p>
+        <p>Für iPhone folgt Advantly später.</p>
+        <p><a href="/app-datenschutz.html">Datenschutz der App</a></p>
+      </section>
+      <section class="translation" lang="en" aria-labelledby="en-title">
+        <h2 id="en-title">You've been invited to Advantly</h2>
+        <p>With Advantly you score racket sport matches on your phone and watch and share them with friends.</p>
+        <ol>
+          <li>Install Advantly on your Android phone.</li>
+          <li>Create an account or sign in.</li>
+          <li>Then tap this link again. The app shows who invited you, and you decide.</li>
+        </ol>
+        <div class="actions">
+          <a class="btn btn-primary" href="https://play.google.com/store/apps/details?id=eu.advantly" rel="noreferrer">Get it on Google Play</a>
+          <button class="btn btn-ghost" type="button" data-copy="en">Copy link</button>
+        </div>
+        <p id="status-en" class="status" role="status" aria-live="polite"></p>
+        <p>If the link doesn't open in the app, copy it and paste it into “Add friend” in Advantly.</p>
+        <p class="note">During the pilot, for invited testers only. If you're not on the tester list, Google Play shows the app as unavailable.</p>
+        <p>Advantly for iPhone is coming later.</p>
+        <p><a href="/en/app-privacy.html">App privacy policy</a></p>
+      </section>
+    </div>
+  </main>
+  <script>
+    // Kopiert nur auf Klick den vollständigen Link (inkl. Fragment); er wird nie zerlegt, angezeigt oder gesendet.
+    var done = { de: ['Link kopiert.', 'Kopieren nicht möglich. Nutze den Link aus deiner Nachricht.'],
+                 en: ['Link copied.', 'Unable to copy. Use the link from your message.'] };
+    document.querySelectorAll('[data-copy]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var l = b.getAttribute('data-copy'), s = document.getElementById('status-' + l);
+        var ok = function () { s.textContent = done[l][0]; }, fail = function () { s.textContent = done[l][1]; };
+        if (navigator.clipboard) navigator.clipboard.writeText(location.href).then(ok, fail); else fail();
+      });
+    });
+  </script>
+</body>
+</html>

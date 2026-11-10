@@ -8,7 +8,8 @@ export const BATCH_LIMIT = 10;
 const CONCURRENCY = 10;
 export const BUDGET_MS = 10_000;
 export const SEND_DEADLINE_MS = 14_000;
-const DATA_KEYS = ["v", "kind", "matchId", "profileId", "role"];
+// playerId: Gast-ID bei player_claimed (20261109000100).
+const DATA_KEYS = ["v", "kind", "matchId", "profileId", "role", "playerId"];
 
 interface Target {
   deviceId?: string;

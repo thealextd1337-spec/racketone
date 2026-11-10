@@ -1,0 +1,6 @@
+New in 0.7.0:
+• Invite friends by link or QR code (QR valid for 10 minutes, link for 14 days).
+• Guests take over their matches via an invitation link; you get notified and can remove the link.
+• If a linked friend deletes their account, your guest keeps its name.
+• New privacy policy (version 10), please confirm once.
+Please test: send a link via WhatsApp to a second account, scan the QR with the camera app, let a guest take over via link.

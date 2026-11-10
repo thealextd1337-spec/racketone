@@ -1,6 +1,13 @@
 -- Servergrenze: echte Owner-Uploads nach K3, ohne neuen Client-/Releasevertrag.
 begin;
 select plan(1326);
+-- 0.7.0 (20261109000200): Mit dem gelöschten Konto verknüpfte fremde Gäste werden bei der Kontolöschung entkoppelt
+-- statt redigiert (neues Verhalten: 470/520). Diese Datei prüft die unveränderte Redaktionsmechanik für pensionierte
+-- Spieler-IDs weiter mit solchen Gästen als Fixture und schaltet die Entkopplung dazu transaktionslokal ab.
+create or replace function private.release_linked_guests(p_profile uuid) returns void language plpgsql as $$
+begin
+  null;
+end $$;
 select tests.world();
 select tests.publish_consent_documents('redaction-write-220');
 select tests.accept_current_consents(id) from tests.users;
@@ -499,7 +506,7 @@ select is(pg_temp.operation_error($$select public.create_invite('claim_player','
 reset role;
 select tests.authenticate_as('r2a_vera');
 select is(pg_temp.operation_error($$select public.redeem_invite(current_setting('tests.retired_claim'))$$),
- 'P0001:player_redacted','Previously issued claim token cannot resurrect a retired guest');
+ 'P0001:invalid_invite','Previously issued claim token cannot resurrect a retired guest');
 reset role;
 select ok((select profile_id is null from public.players where id='77010000-0000-4000-8000-0000000000f1')
  and (select used_at is null from public.invites where token_hash=sha256(convert_to(current_setting('tests.retired_claim'),'UTF8'))),
@@ -678,7 +685,7 @@ select is(pg_temp.operation_error($$select public.create_invite('claim_player','
  'P0001:player_redacted','H2: conflicted retirement also rejects claim creation');
 select tests.authenticate_as('q_bob');
 select is(pg_temp.operation_error($$select public.redeem_invite(current_setting('tests.conflicted_claim'))$$),
- 'P0001:player_redacted','H2: existing claim redemption detects conflicted write retirement');
+ 'P0001:invalid_invite','H2: existing claim redemption detects conflicted write retirement');
 reset role;
 select ok((select used_at is null from public.invites where token_hash=sha256(convert_to(current_setting('tests.conflicted_claim'),'UTF8'))),
  'H2: rejected claim token is not consumed');

@@ -1,6 +1,7 @@
 package eu.advantly.ui.phone.auth
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,6 +31,7 @@ import eu.advantly.ui.phone.app.rememberSafeLinkOpener
 import eu.advantly.ui.phone.common.AdvantlyButton
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Spacing
+import eu.advantly.ui.phone.friends.InvitePendingBanner
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.app_name
 import eu.advantly.ui.phone.resources.consent_terms
@@ -60,10 +62,18 @@ internal fun AccountGate(
     var started by remember { mutableStateOf(false) }
     // Abbrechen aus jedem späteren Schritt führt wieder zur Wahl „Konto anlegen“ / „Anmelden“.
     LaunchedEffect(state.step) { if (state.step != AuthStep.AGE) started = false }
-    if (state.step == AuthStep.AGE && state.error == null && !started) {
-        StartLoginScreen(onCreate = { started = true }, onSignIn = model::signInExisting)
-    } else {
-        AccountScreen(model, google, onSupport, onShareExport, telemetry)
+    // Wartender Einladungslink (plan-einladungen §5.1): Hinweis über dem Konto-Fluss.
+    Column(Modifier.fillMaxSize()) {
+        model.invitations?.let {
+            InvitePendingBanner(it, Modifier.padding(horizontal = Spacing.screenEdgeCompact, vertical = Spacing.s))
+        }
+        Box(Modifier.weight(1f)) {
+            if (state.step == AuthStep.AGE && state.error == null && !started) {
+                StartLoginScreen(onCreate = { started = true }, onSignIn = model::signInExisting)
+            } else {
+                AccountScreen(model, google, onSupport, onShareExport, telemetry)
+            }
+        }
     }
 }
 

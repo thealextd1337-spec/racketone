@@ -1,0 +1,6 @@
+Neu in 0.7.0:
+• Freunde per Link oder QR-Code einladen (QR 10 Minuten gültig, Link 14 Tage).
+• Gäste übernehmen ihre Matches per Einladungslink; du wirst benachrichtigt und kannst die Verknüpfung lösen.
+• Löscht ein verknüpfter Freund sein Konto, bleibt dein Gast mit seinem Namen erhalten.
+• Neue Datenschutzerklärung (Version 10), bitte einmal bestätigen.
+Bitte testen: Link per WhatsApp an ein Zweitkonto, QR mit der Kamera-App scannen, Gast per Link übernehmen lassen.

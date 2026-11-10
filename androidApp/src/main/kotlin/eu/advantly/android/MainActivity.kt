@@ -41,6 +41,9 @@ class MainActivity : ComponentActivity() {
 
     /** Angetippte Benachrichtigung; der Freunde-Tab setzt sie nach dem Öffnen zurück. */
     private val pushTarget = mutableStateOf<PushTarget?>(null)
+
+    /** Angetippter Einladungslink; geht an das Konto-ViewModel, sobald es steht. */
+    private val invites = InviteInbox()
     private var notifications: AndroidNotificationSettings? = null
 
     /** Ergebnis vor [start] (neu erzeugte Activity, Installationsprüfung läuft noch): danach zustellen. */
@@ -60,6 +63,7 @@ class MainActivity : ComponentActivity() {
         sessionAccess?.close()
         sessionAccess = null
         account = null
+        invites.deliver = null
         notifications = null
         // Entfernen der Composition beendet ihre Subscriptions; Kontojobs nicht über Retry behalten.
         viewModelStore.clear()
@@ -80,6 +84,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
+        invites.save(outState)
         // Im Ladezustand den Merker des Ursprungs unverändert weitergeben: Eine echte Wiederherstellung bleibt eine.
         val original = createdFrom
         when {
@@ -92,6 +97,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         intent.pushTarget()?.let { pushTarget.value = it }
+        invites.take(intent)
     }
 
     override fun onDestroy() {
@@ -105,6 +111,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         createdFrom = savedInstanceState
         if (savedInstanceState == null) pushTarget.value = intent.pushTarget()
+        invites.take(intent, restored = savedInstanceState != null)
+        invites.restore(savedInstanceState)
         // Kopie und quick_check laufen im Hintergrund; bis dahin nur die Ladeansicht (bekanntes Ergebnis: sofort).
         showInstallationLoading()
         AndroidInstallationGuard.checkAsync(applicationContext) { availability ->
@@ -151,13 +159,18 @@ class MainActivity : ComponentActivity() {
                     ViewModelProvider(
                         this,
                         object : ViewModelProvider.Factory {
+                            // Eigener SavedStateHandle: der wartende Einladungslink übersteht ein Prozessende (§3.4).
                             @Suppress("UNCHECKED_CAST")
-                            override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T = createPhoneAccount() as T
+                            override fun <T : androidx.lifecycle.ViewModel> create(
+                                modelClass: Class<T>,
+                                extras: CreationExtras,
+                            ): T = createPhoneAccount(extras.createSavedStateHandle()) as T
                         },
                     )[AuthViewModel::class.java]
                 }.getOrNull()
             }
         account = auth
+        invites.deliver = auth?.invitations?.let { model -> { token -> model.receive(token) } }
         val support =
             auth?.support ?: runCatching {
                 ViewModelProvider(

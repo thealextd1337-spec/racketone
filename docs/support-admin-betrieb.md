@@ -126,6 +126,21 @@ mit dem geprüften Zuordnungsbeleg. Vorgangsnummer oder Kontaktadresse allein be
 **Bekannte Grenzen:** Ein Admin-JWT bleibt nach Logout oder Entfernen der MFA bis zu seinem Ablauf gültig.
 Suchen über `admin_account_lookup` werden nicht protokolliert.
 
+### Gastname redigieren (Widerspruch Art. 21/17)
+
+Seit 0.7.0 behält ein Gast, der mit einem später gelöschten Konto verknüpft war, beim Anleger seinen Namen
+(berechtigtes Interesse, Art. 6 Abs. 1 lit. f). Widerspricht die bezeichnete Person (Art. 21) oder verlangt sie die
+Löschung (Art. 17), auch ohne eigenes Konto, redigiert ein `admin` den Namen im Admin-Web, Bereich „Konten“, Abschnitt
+„Gastname redigieren“ (`admin_redact_guest_name`, AAL2):
+- Eingabe: Spieler-ID des Gasts (UUID, vom Anleger bzw. aus der Meldung) und Begründung mit Bezug zur Meldung. Den
+  Gastnamen nicht in die Begründung schreiben; sie steht im Konto-Audit des Anlegers (`guest_name_redact`).
+- Wirkung, nicht umkehrbar: In allen Matches des Gasts steht „Gelöschter Spieler“ (Teilnehmer, Gastliste,
+  PlayerAssigned), die Geräte laden die Matches neu, eine Verknüpfung wird gelöst, offene Claim-Links werden
+  zurückgezogen, der Gast lässt sich danach nicht mehr zuordnen oder beanspruchen.
+- Ein zweiter Aufruf meldet „schon redigiert“ und schreibt kein Audit. Unbekannte IDs und Self-Spieler:
+  `player_not_found`.
+- Vorher prüfen, dass die Meldung den Gast plausibel betrifft (Anleger, Matchdatum, Gastname aus der Meldung).
+
 ## Datenschutz und Aufbewahrung
 
 - Nur RPC-Zugriff: normale Konten lesen ausschließlich eigene Meldungen und öffentliche Antworten.

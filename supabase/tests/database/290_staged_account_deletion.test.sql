@@ -156,7 +156,7 @@ select is(pg_temp.as_user('bob', $$select coalesce(r->>'alias', 'null') from jso
   'null', 'Role alias is hidden');
 select is(pg_temp.as_user('bob', $$select p->>'displayName' || ' ' || coalesce(p->>'profileId', 'null')
   from jsonb_array_elements(public.sync_pull(0, 500)->'players') p where p->>'id' = '29100000-0000-4000-8000-000000000002'$$),
-  'Gelöschter Spieler null', 'Assigned dummy is unlinked and renamed');
+  'Alice bei Bob null', '0.7.0: assigned dummy is unlinked and keeps its name');
 select is_empty($$select 1 from public.invites where created_by = tests.uid('alice')$$, 'Invites are gone');
 select is(pg_temp.as_user('bob', $$select public.tournament_overview('29200000-0000-4000-8000-000000000001')$$),
   'ERR 42501 forbidden', 'Staff no longer sees the tournament');

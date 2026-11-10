@@ -35,6 +35,31 @@ class ManifestTest {
         assertEquals("adjustResize", main.getAttributeNS(android, "windowSoftInputMode"))
     }
 
+    /** plan-einladungen §3.1: verifizierter App Link nur für https://advantly.eu/i/…, keine neue Berechtigung. */
+    @Test
+    fun mainActivityOpensVerifiedInvitationLinks() {
+        val main = elements("activity").single { it.getAttributeNS(android, "name") == ".MainActivity" }
+        val filters = main.getElementsByTagName("intent-filter").let { n -> (0 until n.length).map { n.item(it) as Element } }
+        val view =
+            filters.single { f ->
+                (f.getElementsByTagName("action").item(0) as Element).getAttributeNS(android, "name") == "android.intent.action.VIEW"
+            }
+        assertEquals("true", view.getAttributeNS(android, "autoVerify"))
+        // Ein Link aus WhatsApp/Browser landet per onNewIntent in der laufenden Instanz statt in einer zweiten Activity.
+        assertEquals("singleTask", main.getAttributeNS(android, "launchMode"))
+        val categories =
+            view.getElementsByTagName("category").let { n ->
+                (0 until n.length).map { (n.item(it) as Element).getAttributeNS(android, "name") }
+            }
+        assertEquals(setOf("android.intent.category.DEFAULT", "android.intent.category.BROWSABLE"), categories.toSet())
+        val data = view.getElementsByTagName("data").item(0) as Element
+        assertEquals("https", data.getAttributeNS(android, "scheme"))
+        assertEquals("advantly.eu", data.getAttributeNS(android, "host"))
+        assertEquals("/i/", data.getAttributeNS(android, "pathPrefix"))
+        assertEquals(1, view.getElementsByTagName("data").length)
+        assertTrue(elements("uses-permission").none { it.getAttributeNS(android, "name") == "android.permission.CAMERA" })
+    }
+
     @Test
     fun applicationStartsTheSession() {
         assertEquals(".AdvantlyPhoneApplication", elements("application").single().getAttributeNS(android, "name"))

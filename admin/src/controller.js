@@ -1,5 +1,6 @@
 import {
   buildAccountAction,
+  buildGuestRedaction,
   buildTicketUpdateArgs,
   createRequestEpoch,
   makeMessageOperation,
@@ -60,6 +61,8 @@ function initialState(config) {
     accountDraft: { reason: "", ticketId: "" },
     accountSaving: false,
     accountConfirmation: null,
+    guestDraft: { playerId: "", reason: "" },
+    guestNotice: null,
   };
 }
 
@@ -97,6 +100,8 @@ function noticeForError(error, fallback = "genericError") {
     case "device_not_revoked": return "accountDeviceNotRevoked";
     case "account_suspended": return "accountUnrevokeSuspended";
     case "account_deletion_pending": return "accountUnrevokeDeletionPending";
+    case "guest-player-invalid": return "guestPlayerInvalid";
+    case "player_not_found": return "guestNotFound";
     default: return fallback;
   }
 }
@@ -175,6 +180,8 @@ export class AdminController {
       "account-action": (payload) => this.runAccountAction(payload?.action, payload?.fields),
       "confirm-account-action": () => this.confirmAccountAction(),
       "cancel-account-action": () => this.cancelAccountAction(),
+      "guest-draft": (payload) => this.setGuestDraft(payload?.fields),
+      "guest-redact": (payload) => this.runGuestRedaction(payload?.fields),
     };
     for (const [event, callback] of Object.entries(routes)) {
       this.view.on(event, callback);
@@ -791,9 +798,58 @@ export class AdminController {
     this.view.hideAccountConfirmation?.();
   }
 
+  setGuestDraft(fields) {
+    if (!this.hasAccess() || !fields) return;
+    this.state.guestDraft = { ...this.state.guestDraft, ...fields };
+  }
+
+  // Gastname redigieren: unabhängig vom gesuchten Konto, derselbe Bestätigungsdialog wie bei Kontoaktionen.
+  runGuestRedaction(fields) {
+    if (!this.hasAccess() || this.state.accountSaving) return;
+    if (fields) this.state.guestDraft = { ...this.state.guestDraft, ...fields };
+    let operation;
+    try {
+      operation = buildGuestRedaction(this.state.guestDraft);
+    } catch (error) {
+      this.state.guestNotice = noticeForError(error, "invalidFields");
+      this.render();
+      return;
+    }
+    this.state.accountConfirmation = operation;
+    this.view.showAccountConfirmation?.({ actionKey: "guestRedact", titleKey: "guestConfirmTitle",
+      targetKey: "guestConfirmTarget", alias: "", profileId: operation.args.p_player_id, reason: operation.args.p_reason });
+  }
+
+  async confirmGuestRedaction(operation) {
+    const request = this.accountEpoch.next();
+    const session = this.sessionToken;
+    this.state.accountSaving = true;
+    this.state.guestNotice = null;
+    this.render();
+    try {
+      const result = await this.api.redactGuestName(operation);
+      if (!this.accountEpoch.isCurrent(request) || !this.sessionEpoch.isCurrent(session)) return;
+      if (result?.playerId !== operation.args.p_player_id) throw new SupportError("support_unavailable");
+      this.state.guestDraft = { playerId: "", reason: "" };
+      this.state.guestNotice = result.changed ? "guestRedacted" : "guestAlreadyRedacted";
+      this.state.accountSaving = false;
+      this.render();
+    } catch (error) {
+      if (!this.accountEpoch.isCurrent(request) || !this.sessionEpoch.isCurrent(session)) return;
+      this.state.accountSaving = false;
+      if (this.handleAccessError(error)) return;
+      this.state.guestNotice = noticeForError(error, "genericError");
+      this.render();
+    }
+  }
+
   async confirmAccountAction() {
     const operation = this.state.accountConfirmation;
     this.cancelAccountAction();
+    if (operation?.rpc === "admin_redact_guest_name") {
+      if (this.hasAccess() && !this.state.accountSaving) await this.confirmGuestRedaction(operation);
+      return;
+    }
     if (!operation || !this.hasAccess() || this.state.accountSaving || this.state.account?.profileId !== operation.args.p_profile_id) return;
     const request = this.accountEpoch.next();
     const session = this.sessionToken;

@@ -67,7 +67,7 @@ select ok(not private.are_friends(tests.uid('alice'), tests.uid('carol')), 'kein
 -- Redigierter Gast (Kontolöschung o. Ä. nach dem Erzeugen): weiterhin abgelehnt.
 select set_config('tests.redacted', pg_temp.invite('claim_player', '49100000-0000-4000-8000-000000000002'), true);
 insert into private.player_write_redactions (player_id) values ('49100000-0000-4000-8000-000000000002');
-select is(pg_temp.redeem('carol', current_setting('tests.redacted')), 'ERR P0001 player_redacted', 'redigierter Gast: abgelehnt');
+select is(pg_temp.redeem('carol', current_setting('tests.redacted')), 'ERR P0001 invalid_invite', 'redigierter Gast: ungültig wie gelöscht (kein Orakel)');
 select is((select profile_id from public.players where id = '49100000-0000-4000-8000-000000000002'), null, 'redigierter Gast bleibt frei');
 select ok(pg_temp.unused(current_setting('tests.redacted')), 'Link nicht verbraucht');
 

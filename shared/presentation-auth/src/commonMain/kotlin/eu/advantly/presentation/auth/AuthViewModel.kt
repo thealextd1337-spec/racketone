@@ -63,10 +63,13 @@ class AuthViewModel(
     val sync: PhoneSyncPort? = null,
     /** Freunde-Tab (P2-D); Arbeit endet mit diesem ViewModel. */
     val friends: eu.advantly.presentation.friends.FriendsViewModel? = null,
+    /** Einladungen per Link/QR (plan-einladungen); Abmeldung und Altersgate verwerfen einen wartenden Link. */
+    val invitations: eu.advantly.presentation.friends.InvitationsViewModel? = null,
 ) : ViewModel() {
     override fun onCleared() {
         support?.close()
         friends?.close()
+        invitations?.close()
         var closesStarted = false
         var uploadDrained = upload == null
         var exportDrained = export == null
@@ -287,6 +290,7 @@ class AuthViewModel(
                 email = ""
                 existingAccount = false
                 askHealth = false
+                invitations?.signedOut()
                 mutable.value = AuthState()
             }
         }
@@ -406,6 +410,8 @@ class AuthViewModel(
                 val reset =
                     reason in setOf("age_ticket_expired", "age_ticket_bound", "age_ticket_required", "age_retry_later", "age_below_minimum")
                 if (reset) ticket = null
+                // Altersgrenze oder Land: es entsteht kein Konto, ein wartender Einladungslink ist wertlos (§3.4).
+                if (reason == "age_below_minimum" || reason == "country_not_supported") invitations?.needsAccount()
                 mutable.value =
                     mutable.value.copy(
                         step = if (reset) AuthStep.AGE else mutable.value.step,

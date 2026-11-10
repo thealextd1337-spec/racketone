@@ -32,6 +32,8 @@
     <string name="push_friend_accepted_neutral">Deine Freundschaftsanfrage wurde angenommen</string>
     <string name="push_player_assigned">%1$s hat dich in ein Match eingetragen</string>
     <string name="push_player_assigned_neutral">Du wurdest in ein Match eingetragen</string>
+    <string name="push_player_claimed">%1$s hat %2$s übernommen</string>
+    <string name="push_player_claimed_neutral">Ein Gast wurde übernommen</string>
     <string name="push_match_shared">%1$s hat ein Match mit dir geteilt</string>
     <string name="push_match_shared_neutral">Ein Match wurde mit dir geteilt</string>
     <string name="push_visitor_invited">%1$s lädt dich zum Zuschauen ein</string>

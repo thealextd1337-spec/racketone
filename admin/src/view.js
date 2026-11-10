@@ -168,6 +168,10 @@ export class AdminView {
         if (target.dataset.deviceId) fields.deviceId = target.dataset.deviceId;
         this.emit("account-action", { action: target.dataset.accountAction, fields });
       }
+      else if (target.dataset.action === "guest-redact") {
+        const field = (name) => this.app.querySelector(`[data-guest-field="${name}"]`)?.value ?? "";
+        this.emit("guest-redact", { fields: { playerId: field("playerId"), reason: field("reason") } });
+      }
       else this.emit(target.dataset.action);
     };
     this.handleSubmit = (event) => {
@@ -206,6 +210,7 @@ export class AdminView {
       else if (target.dataset.field === "message") this.emit("composer", { body: target.value, mode: this.getComposerMode() });
       else if (target.dataset.ticketField) this.emit("ticket-draft", { fields: { [target.dataset.ticketField]: target.value } });
       else if (target.dataset.accountField) this.emit("account-draft", { fields: { [target.dataset.accountField]: target.value } });
+      else if (target.dataset.guestField) this.emit("guest-draft", { fields: { [target.dataset.guestField]: target.value } });
     };
     this.handleChange = (event) => {
       const target = event.target;
@@ -459,6 +464,7 @@ export class AdminView {
       body.append(this.renderAccountStatus(language, state.account));
       body.append(state.viewerRole === "admin" ? this.renderAccountActions(state) : node("p", "field-hint", translate(language, "accountReadOnly")));
     }
+    body.append(this.renderGuestRedaction(state));
     panel.append(body);
     return panel;
   }
@@ -484,6 +490,27 @@ export class AdminView {
     item("accountLastActivity", account.lastActivityDay ? formatDay(account.lastActivityDay, language) : "");
     const versions = account.consentVersions ?? {};
     item("accountConsent", `${account.consentStatus ?? ""} \u00b7 ${translate(language, "accountTerms")} ${versions.TERMS ?? "\u2014"} \u00b7 ${translate(language, "accountPrivacy")} ${versions.PRIVACY ?? "\u2014"}`);
+    return section;
+  }
+
+  // Gastname redigieren (Widerspruch Art. 21/17): ohne Kontosuche, nur admin mit AAL2 (Server prüft). Kein <form>.
+  renderGuestRedaction(state) {
+    const language = state.language;
+    const draft = state.guestDraft ?? {};
+    const section = node("div", "update-form");
+    section.append(node("h3", "section-title", translate(language, "guestRedactTitle")), node("p", "field-hint", translate(language, "guestRedactHint")));
+    const player = fieldInput({ value: draft.playerId, placeholder: translate(language, "guestPlayerIdPlaceholder"), name: "playerId", focusKey: "guest-player", required: true, maxLength: 36 });
+    player.dataset.guestField = "playerId"; player.autocapitalize = "none"; player.spellcheck = false;
+    const reason = fieldInput({ value: draft.reason, placeholder: translate(language, "updateReasonPlaceholder"), name: "guestReason", focusKey: "guest-reason", required: true, maxLength: 500 });
+    reason.dataset.guestField = "reason";
+    section.append(addFieldLabel(translate(language, "guestPlayerId"), player), addFieldLabel(translate(language, "updateReason"), reason),
+      node("p", "field-hint", translate(language, "guestReasonHint")));
+    if (state.guestNotice) section.append(alertBox(language, state.guestNotice, ["guestRedacted", "guestAlreadyRedacted"].includes(state.guestNotice) ? "success" : "error"));
+    const buttons = node("div", "form-actions");
+    const button = node("button", "button button--accent", translate(language, state.accountSaving ? "saving" : "guestRedact"));
+    button.type = "button"; button.dataset.action = "guest-redact"; button.disabled = state.accountSaving;
+    buttons.append(button);
+    section.append(buttons);
     return section;
   }
 
@@ -842,11 +869,11 @@ export class AdminView {
   }
 
   // Vor jeder zustandsändernden Kontoaktion: Aktion, Zielkonto und Begründung nennen.
-  showAccountConfirmation({ actionKey, alias, profileId, reason, device }) {
+  showAccountConfirmation({ actionKey, titleKey = "accountConfirmTitle", targetKey = "accountConfirmTarget", alias, profileId, reason, device }) {
     const language = this.currentLanguage ?? "en";
     const text = (selector, value) => { const element = this.accountDialog?.querySelector(selector); if (element) element.textContent = value; };
-    text("#account-confirm-title", translate(language, "accountConfirmTitle"));
-    const target = `${translate(language, actionKey)} · ${translate(language, "accountConfirmTarget")} ${alias || "—"} (${profileId})`;
+    text("#account-confirm-title", translate(language, titleKey));
+    const target = `${translate(language, actionKey)} · ${translate(language, targetKey)} ${alias || "—"} (${profileId})`;
     text("#account-confirm-copy", device ? `${target} · ${translate(language, "accountConfirmDevice")} ${deviceLabel(language, device)}` : target);
     text("#account-confirm-preview", reason ?? "");
     text("#account-cancel", translate(language, "cancel"));

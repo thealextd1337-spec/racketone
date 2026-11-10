@@ -136,7 +136,7 @@ select is((select count(*)::int from public.match_events where match_id = 'a8000
           'Event-Log bleibt für bob vollständig');
 select results_eq($$ select display_name, profile_id is null from public.match_participants
                      where match_id = 'a8000000-0000-7000-8000-000000000003' and slot_id = 's-kim' $$,
-                  $$ values ('Gelöschter Spieler'::text, true) $$, 'Belegte Identität von bobs Dummy wird vor dem Unlink anonymisiert');
+                  $$ values ('Kim'::text, true) $$, '0.7.0: bobs Dummy bleibt entknüpft mit seinem Namen (plan-0.6.4)');
 
 -- Lösch-Ausnahme: Klarnamen in Event-Payloads redigiert (Review P2 #4)
 select is((select string_agg(e."payload" -> 'player' ->> 'displayName' || '/' || e."redacted"::text, ',' order by e."matchId")

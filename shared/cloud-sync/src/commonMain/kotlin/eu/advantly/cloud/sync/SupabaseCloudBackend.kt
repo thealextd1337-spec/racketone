@@ -5,11 +5,17 @@ import eu.advantly.data.CloudUploadSnapshot
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlin.time.Instant
 
 /** Auswahl und unveränderlicher Auth-Kontext eines begrenzten Versuchs; keine Credentials in toString. */
 class CloudUploadAttempt internal constructor(
@@ -47,7 +53,8 @@ class SupabaseCloudBackend internal constructor(
     LiveMatchesPort,
     PushTokenPort,
     ScorerRolesPort,
-    GuestLinksPort {
+    GuestLinksPort,
+    InvitesPort {
     private var binding: CloudDeviceBinding? = null
     private var bindingAttempt = 0L
 
@@ -543,6 +550,98 @@ class SupabaseCloudBackend internal constructor(
         rpc(lease(profileId), "reject_player_assignment", buildJsonObject { put("p_player_id", playerId) })
     }
 
+    override suspend fun createInvite(
+        profileId: String,
+        kind: InviteKind,
+        playerId: String?,
+        ttlMinutes: Int,
+    ): String {
+        require(ttlMinutes in 1..MAX_INVITE_TTL_MINUTES && (kind == InviteKind.CLAIM_PLAYER) == (playerId?.isNotBlank() == true))
+        val body =
+            buildJsonObject {
+                put("p_kind", kind.wire)
+                put("p_player_id", playerId)
+                put("p_ttl_minutes", ttlMinutes)
+            }
+        return decode<String>(rpc(lease(profileId), "create_invite", body)).takeIf(INVITE_TOKEN::matches)
+            ?: throw CloudException("cloud_response_invalid", false)
+    }
+
+    override suspend fun previewInvite(
+        profileId: String,
+        token: String,
+    ): InvitePreview {
+        require(INVITE_TOKEN.matches(token))
+        val json = decode<JsonObject>(rpc(lease(profileId), "preview_invite", buildJsonObject { put("p_token", token) }))
+        return strict {
+            val status = InviteStatus.entries.first { it.wire == json.text("status") }
+            if (status == InviteStatus.INVALID) return@strict InvitePreview(status)
+            // Art und Einladender sind nur für `ok`/`already_friends` Pflicht; ein endgültiger Status zählt auch ohne sie.
+            val usable = status == InviteStatus.OK || status == InviteStatus.ALREADY_FRIENDS
+            val kind = json.text("kind")?.let { requireNotNull(InviteKind.of(it)) }
+            require(kind != null || !usable)
+            val claimable = status == InviteStatus.OK && kind == InviteKind.CLAIM_PLAYER
+            InvitePreview(
+                status = status,
+                kind = kind,
+                inviterId = json.text("inviterId")?.also { require(it.isNotBlank()) },
+                inviterAlias = json.text("inviterAlias"),
+                guestName = if (claimable) requireNotNull(json.text("guestName")?.takeIf { it.isNotBlank() }) else null,
+                matchCount = if (claimable) requireNotNull(json.int("matchCount")).also { require(it >= 0) } else null,
+                expiresAtMillis = json.text("expiresAt")?.let { Instant.parse(it).toEpochMilliseconds() },
+            ).also { require(it.inviterId != null || !usable) }
+        }
+    }
+
+    override suspend fun redeemInvite(
+        profileId: String,
+        token: String,
+    ): InviteRedemption {
+        require(INVITE_TOKEN.matches(token))
+        val json = decode<JsonObject>(rpc(lease(profileId), "redeem_invite", buildJsonObject { put("p_token", token) }))
+        return strict {
+            val kind = requireNotNull(InviteKind.of(json.text("kind")))
+            val friendId = requireNotNull(json.text("friendId")?.takeIf { it.isNotBlank() })
+            if (json["alreadyFriends"]?.let { (it as JsonPrimitive).booleanOrNull } == true) {
+                require(kind == InviteKind.FRIEND)
+                return@strict InviteRedemption(kind, friendId, alreadyFriends = true)
+            }
+            val playerId = json.text("playerId")
+            require((kind == InviteKind.CLAIM_PLAYER) == (playerId?.isNotBlank() == true))
+            InviteRedemption(kind, friendId, playerId, requireNotNull(json.int("matchCount")).also { require(it >= 0) })
+        }
+    }
+
+    override suspend fun revokeInvite(
+        profileId: String,
+        inviteId: String,
+    ) {
+        require(inviteId.isNotBlank())
+        rpc(lease(profileId), "revoke_invite", buildJsonObject { put("p_invite_id", inviteId) })
+    }
+
+    override suspend fun openInvites(profileId: String): List<OpenInvite> {
+        val rows =
+            decode<List<JsonObject>>(
+                ownRow("invites", lease(profileId)) {
+                    "created_by=eq.$profileId&used_at=is.null&revoked_at=is.null&select=id,kind,player_id,expires_at&order=expires_at.desc"
+                },
+            )
+        return strict {
+            rows.map { row ->
+                val kind = requireNotNull(InviteKind.of(row.text("kind")))
+                val playerId = row.text("player_id")
+                require((kind == InviteKind.CLAIM_PLAYER) == (playerId?.isNotBlank() == true))
+                OpenInvite(
+                    requireNotNull(row.text("id")?.takeIf { it.isNotBlank() }),
+                    kind,
+                    playerId,
+                    Instant.parse(requireNotNull(row.text("expires_at"))).toEpochMilliseconds(),
+                )
+            }
+        }
+    }
+
     override suspend fun addVisitor(
         profileId: String,
         matchId: String,
@@ -692,6 +791,33 @@ class SupabaseCloudBackend internal constructor(
         require(profileId.isNotBlank())
         rpc(sessions.capture(), name, buildJsonObject { put("p_other", profileId) })
     }
+
+    /** Feld als Text (`null` bei fehlend oder JSON-null); andere Typen sind eine ungültige Antwort. */
+    private fun JsonObject.text(key: String): String? =
+        when (val value: JsonElement? = this[key]) {
+            null, JsonNull -> null
+            is JsonPrimitive -> value.content.also { require(value.isString) }
+            else -> throw IllegalArgumentException()
+        }
+
+    private fun JsonObject.int(key: String): Int? =
+        when (val value = this[key]) {
+            null, JsonNull -> null
+            is JsonPrimitive -> requireNotNull(value.intOrNull.takeUnless { value.isString })
+            else -> throw IllegalArgumentException()
+        }
+
+    /** Strenge Prüfung einer Antwort: jede Abweichung ist `cloud_response_invalid`, nie ein Rohtext an die UI. */
+    private inline fun <T> strict(block: () -> T): T =
+        try {
+            block()
+        } catch (_: IllegalArgumentException) {
+            throw CloudException("cloud_response_invalid", false)
+        } catch (_: NoSuchElementException) {
+            throw CloudException("cloud_response_invalid", false)
+        } catch (_: IllegalStateException) {
+            throw CloudException("cloud_response_invalid", false)
+        }
 
     private inline fun <reified T> decode(response: String): T =
         try {

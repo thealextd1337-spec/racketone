@@ -43,5 +43,9 @@ export function createSupportApi(client) {
       if (!name?.startsWith("admin_account_")) throw new SupportError("support_invalid");
       return rpc(name, args);
     },
+    redactGuestName({ rpc: name, args }) {
+      if (name !== "admin_redact_guest_name") throw new SupportError("support_invalid");
+      return rpc(name, args);
+    },
   });
 }

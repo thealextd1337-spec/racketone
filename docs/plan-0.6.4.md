@@ -1,6 +1,8 @@
 # Plan 0.6.5: Gastname bleibt bei Kontolöschung des verknüpften Freundes
 
-> Status: Entwurf 2026-11-04, überarbeitet nach Review (Fable, Astra) · Bezug: 0.6.3 (PR #97, Gast mit Freund
+> Status: **umgesetzt, gebündelt in 0.7.0 (Build 18), 2026-11-09** (D1 = Ja, D2 = mit Einladungen bündeln; Migration
+> `20261109000200_gastnamen_erhalten.sql`, pgTAP 470/520, `admin_redact_guest_name` nur Rolle `admin` mit AAL2) ·
+> Entwurf 2026-11-04, überarbeitet nach Review (Fable, Astra) · Bezug: 0.6.3 (PR #97, Gast mit Freund
 > verknüpfen, pgTAP 470) · Version **0.6.5**, Build ≥ 18 (nächster freier nach 0.6.4) · **Umsetzung erst nach den
 > Nutzerentscheidungen in §6**
 >

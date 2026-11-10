@@ -68,6 +68,8 @@ googleid = "1.1.1"
 security-crypto = "1.1.0"
 # Push (Plan Live §3.3): nur firebase-messaging, keine Analytics; Google Maven, geprüft 2026-11-02
 firebase-bom = "35.1.0"
+# QR-Code zeigen (plan-einladungen §3.2): nur Encoder aus core, Android + Desktop; Maven Central, geprüft 2026-11-09
+zxing = "3.5.4"
 
 [libraries]
 supabase-auth = { module = "io.github.jan-tennert.supabase:auth-kt", version.ref = "supabase" }
@@ -122,6 +124,7 @@ androidx-sqlite-framework = { module = "androidx.sqlite:sqlite-framework", versi
 sqldelight-sqlite-driver = { module = "app.cash.sqldelight:sqlite-driver", version.ref = "sqldelight" }
 sqldelight-native-driver = { module = "app.cash.sqldelight:native-driver", version.ref = "sqldelight" }
 play-services-wearable = { module = "com.google.android.gms:play-services-wearable", version.ref = "play-services-wearable" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 wear-remote-interactions = { module = "androidx.wear:wear-remote-interactions", version.ref = "wear-remote-interactions" }
 
 kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotest" }

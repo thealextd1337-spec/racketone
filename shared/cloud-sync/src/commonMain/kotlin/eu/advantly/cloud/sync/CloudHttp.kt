@@ -60,7 +60,7 @@ internal class CloudHttp(
 
     /**
      * Einzige direkte Tabellen-Grenze (P2-E): eigene Zeile `profile_settings` lesen bzw. mit [patch] spaltenweise ändern,
-     * eigene Zeile `profiles` (Alias, Benutzername fürs Profil) nur lesen (Spaltenrecht + RLS + Cloud-Bindung; Blocklisten
+     * eigene Zeile `profiles` (Alias, Benutzername fürs Profil) und eigene offene `invites` (ohne `token_hash`) nur lesen (Spaltenrecht + RLS + Cloud-Bindung; Blocklisten
      * u. a. laufen über Cloud-RPCs). Liefert die (geänderten) Zeilen.
      */
     suspend fun ownRow(
@@ -70,7 +70,7 @@ internal class CloudHttp(
         accessToken: String,
         installation: CloudInstallation,
     ): String {
-        require(table == "profile_settings" || (table == "profiles" && patch == null))
+        require(table == "profile_settings" || (table in setOf("profiles", "invites") && patch == null))
         return request(
             "$table?$query",
             patch?.toString(),
@@ -286,6 +286,12 @@ internal class CloudHttp(
                 "device_not_owned",
                 "device_owned_by_other",
                 "paired_device_unknown",
+                // Einladungen per Link/QR (plan-einladungen §3)
+                "invalid_invite",
+                "invalid_invite_kind",
+                "own_invite",
+                "too_many_open_invites",
+                "invite_not_found",
             )
     }
 }
