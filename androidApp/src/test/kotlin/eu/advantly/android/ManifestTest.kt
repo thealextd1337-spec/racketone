@@ -45,6 +45,8 @@ class ManifestTest {
                 (f.getElementsByTagName("action").item(0) as Element).getAttributeNS(android, "name") == "android.intent.action.VIEW"
             }
         assertEquals("true", view.getAttributeNS(android, "autoVerify"))
+        // Ein Link aus WhatsApp/Browser landet per onNewIntent in der laufenden Instanz statt in einer zweiten Activity.
+        assertEquals("singleTask", main.getAttributeNS(android, "launchMode"))
         val categories =
             view.getElementsByTagName("category").let { n ->
                 (0 until n.length).map { (n.item(it) as Element).getAttributeNS(android, "name") }

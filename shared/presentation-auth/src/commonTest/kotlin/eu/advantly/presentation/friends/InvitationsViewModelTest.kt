@@ -290,6 +290,18 @@ class InvitationsViewModelTest {
             assertFalse(state.pending, "Besitzer im SavedState: Kontowechsel über Prozessende")
         }
 
+    /** Die UI merkt sich `received` über Sitzungen hinweg; fiele der Zähler zurück, bliebe der nächste Link unsichtbar. */
+    @Test fun receivedKeepsCountingAcrossAccountSwitches() =
+        fixture(ready("anja")) {
+            port.failure = "cloud_connection_failed"
+            model.receive(LINK)
+            assertEquals(1, state.received)
+            auth.session.value = ready("bob")
+            assertEquals(1, state.received)
+            model.receive(LINK)
+            assertEquals(2, state.received)
+        }
+
     @Test fun signOutAndAgeGateDiscardTheLink() =
         fixture {
             val auth = auth

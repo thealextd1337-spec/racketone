@@ -1079,7 +1079,7 @@
     <string name="invite_error_own">Das ist deine eigene Einladung.</string>
     <string name="invite_error_claimed">%1$s wurde schon übernommen.</string>
     <string name="invite_error_claimed_neutral">Dieser Gast wurde schon übernommen.</string>
-    <string name="invite_error_too_many">Du hast zu viele offene Einladungen. Ziehe alte zurück oder warte, bis sie ablaufen.</string>
+    <string name="invite_error_too_many">Du hast zu viele offene Einladungen. Warte, bis ältere ablaufen.</string>
     <string name="invite_retry">Erneut versuchen</string>
     <string name="guest_invite_send">Einladungslink senden</string>
     <string name="guest_invite_confirm_text">Wer den Link öffnet, übernimmt alle Matches von %1$s und wird dein Freund. Schick ihn nur an die Person, die %1$s ist.</string>

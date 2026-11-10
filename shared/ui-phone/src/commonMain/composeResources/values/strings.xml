@@ -1079,7 +1079,7 @@
     <string name="invite_error_own">This is your own invitation.</string>
     <string name="invite_error_claimed">%1$s has already been taken over.</string>
     <string name="invite_error_claimed_neutral">This guest has already been taken over.</string>
-    <string name="invite_error_too_many">You have too many open invitations. Withdraw old ones or wait until they expire.</string>
+    <string name="invite_error_too_many">You have too many open invitations. Wait until older ones expire.</string>
     <string name="invite_retry">Try again</string>
     <string name="guest_invite_send">Send invitation link</string>
     <string name="guest_invite_confirm_text">Whoever opens the link takes over all matches of %1$s and becomes your friend. Only send it to the person who is %1$s.</string>

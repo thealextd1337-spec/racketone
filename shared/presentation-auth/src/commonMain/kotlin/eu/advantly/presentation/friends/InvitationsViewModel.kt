@@ -326,7 +326,8 @@ class InvitationsViewModel(
             inviteJob?.cancel()
             guestJob?.cancel()
             knownFriends = null
-            mutable.value = InvitationsState(access = access, pending = token() != null)
+            // received zählt weiter: die UI merkt sich den zuletzt behandelten Stand über Sitzungswechsel hinweg.
+            mutable.value = InvitationsState(access = access, pending = token() != null, received = mutable.value.received)
         } else {
             mutable.value = mutable.value.copy(access = access)
         }

@@ -254,7 +254,7 @@ Pfad: **Richtlinien → App-Inhalte**. Alle Punkte müssen vor dem geschlossenen
   commit;
   ```
   **0.7.0 (Datenschutzerklärung Version 10, Einladungslinks/QR, Gast übernehmen, Gastname bei Kontolöschung):** nur PRIVACY
-  wechselt, TERMS 2 bleibt. Vorher prüfen, dass PRIVACY 9 aktuell ist. Reihenfolge: Migrationen `20261109000100`/`0200`
+  wechselt, TERMS 2 bleibt. Vorher prüfen, dass PRIVACY 9 aktuell ist. Reihenfolge: Migrationen `20261109000100`/`0200`/`0300`
   auf staging (Edge Function `push-dispatch` neu ausrollen, wegen `playerId`), Merge, Seite live (inkl.
   `.well-known/assetlinks.json` und `/i/`, **vor** dem App-Rollout, weil Android beim Installieren verifiziert), App 0.7.0
   ausrollen (Phone + Wear aus einem Commit), dann freigeben und `is_current` prüfen.

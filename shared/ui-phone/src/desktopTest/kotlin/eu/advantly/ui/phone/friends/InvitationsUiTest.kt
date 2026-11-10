@@ -248,7 +248,7 @@ class InvitationsUiTest {
                     click("invite_qr_new")
                     waitForIdle()
                     onNodeWithTag("invite_error")
-                        .assertTextEquals("Du hast zu viele offene Einladungen. Ziehe alte zurück oder warte, bis sie ablaufen.")
+                        .assertTextEquals("Du hast zu viele offene Einladungen. Warte, bis ältere ablaufen.")
                 }
             }
         }

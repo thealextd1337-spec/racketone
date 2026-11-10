@@ -34,6 +34,8 @@ $$;
 
 -- S1: Vorschau vor dem Einlösen, nur lesend. Ungültig (unbekannt, Blockierung in beide Richtungen, Ersteller nicht
 -- aktiv bzw. in Löschung, Gast gelöscht oder redigiert) liefert nur {status: invalid}, wie redeem_invite kein Orakel.
+-- Endgültig tote Links (revoked/used/expired) liefern nur {status}, ohne Einladenden. Hat der Aufrufer den Link selbst
+-- eingelöst (Antwort verloren, „Erneut versuchen“), zählt das als Erfolg: already_claimed bzw. already_friends.
 -- guestName/matchCount nur für claim_player mit ok. matchCount zählt dieselben Teilnehmerzeilen, die
 -- link_player_participants beim Einlösen verknüpfen würde (ohne Matches, in denen der Aufrufer schon steht oder die er
 -- per „War ich nicht“ abgelehnt hat) – also genau die matchCount-Antwort von redeem_invite.
@@ -59,12 +61,17 @@ begin
   end if;
   v_status := case
     when v_inv.created_by = v_uid then 'own'
+    when v_inv.used_by = v_uid and v_inv.kind = 'claim_player' then 'already_claimed'
+    when v_inv.used_by = v_uid and private.are_friends(v_uid, v_inv.created_by) then 'already_friends'
     when v_inv.revoked_at is not null then 'revoked'
     when v_inv.used_at is not null then 'used'
     when v_inv.expires_at <= now() then 'expired'
     when v_inv.kind = 'claim_player' and v_player.profile_id is not null then 'already_claimed'
     when v_inv.kind = 'friend' and private.are_friends(v_uid, v_inv.created_by) then 'already_friends'
     else 'ok' end;
+  if v_status in ('revoked', 'used', 'expired') then
+    return jsonb_build_object('status', v_status);
+  end if;
   return jsonb_build_object('status', v_status, 'kind', v_inv.kind, 'inviterId', v_inv.created_by,
       'inviterAlias', (select f.alias from public.profiles f where f.id = v_inv.created_by),
       'expiresAt', to_char(v_inv.expires_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'))

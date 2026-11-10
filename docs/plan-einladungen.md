@@ -392,7 +392,7 @@ Nicht nötig: neue Tabellen, Änderungen an `sync_pull` (Claims laufen über die
 | `invite_error_revoked` | Diese Einladung wurde zurückgezogen. | This invitation was withdrawn. |
 | `invite_error_own` | Das ist deine eigene Einladung. | This is your own invitation. |
 | `invite_error_claimed` | %1$s wurde schon übernommen. | %1$s has already been taken over. |
-| `invite_error_too_many` | Du hast zu viele offene Einladungen. Ziehe alte zurück oder warte, bis sie ablaufen. | You have too many open invitations. Withdraw old ones or wait until they expire. |
+| `invite_error_too_many` | Du hast zu viele offene Einladungen. Warte, bis ältere ablaufen. | You have too many open invitations. Wait until older ones expire. |
 | `invite_scan_not_advantly` | Kein Advantly-Code | Not an Advantly code |
 | `invite_scan_preparing` | Scanner wird vorbereitet. Versuche es gleich noch einmal. | Scanner is getting ready. Try again in a moment. |
 | `guest_invite_send` | Einladungslink senden | Send invitation link |

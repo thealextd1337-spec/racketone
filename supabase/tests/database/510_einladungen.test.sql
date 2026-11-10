@@ -3,7 +3,7 @@
 -- Aufräumjob S7, Push player_claimed S8, Rechte und Cloud-Bindung. redeem_invite bleibt unverändert (490).
 begin;
 set local timezone = 'UTC';
-select plan(66);
+select plan(70);
 select tests.world();
 select tests.publish_consent_documents('ei-510');
 select tests.accept_current_consents(id) from tests.users;
@@ -104,7 +104,8 @@ select is(pg_temp.preview('bob', current_setting('tests.claim')), jsonb_build_ob
   'claim ok: zusätzlich guestName und matchCount (M2: bob steht schon drin, M3: abgelehnt)');
 select is(pg_temp.preview('carol', current_setting('tests.claim'))::jsonb ->> 'matchCount', '3', 'carol würde alle drei übernehmen');
 select is(pg_temp.redeem('bob', current_setting('tests.claim'))::jsonb ->> 'matchCount', '1', 'redeem übernimmt genau so viele');
-select is(pg_temp.status('carol', current_setting('tests.claim')), 'used', 'benutzter Link: used');
+select is(pg_temp.preview('carol', current_setting('tests.claim')), '{"status": "used"}', 'benutzter Link: nur {status: used}');
+select is(pg_temp.status('bob', current_setting('tests.claim')), 'already_claimed', 'eigener Claim (Antwort verloren): already_claimed');
 select is(pg_temp.status('alice', current_setting('tests.claim')), 'own', 'auch benutzt bleibt er für alice own');
 
 -- S8: player_claimed an alice, nur IDs, zustellbar solange der Claim besteht.
@@ -144,7 +145,13 @@ select is(pg_temp.preview('carol', current_setting('tests.taken'))::jsonb ?| arr
 -- expired
 select set_config('tests.expired', pg_temp.invite('friend'), true);
 update public.invites set expires_at = now() - interval '1 second' where id = (pg_temp.inv(current_setting('tests.expired'))).id;
-select is(pg_temp.status('carol', current_setting('tests.expired')), 'expired', 'abgelaufen: expired');
+select is(pg_temp.preview('carol', current_setting('tests.expired')), '{"status": "expired"}', 'abgelaufen: nur {status: expired}');
+-- Selbst eingelöster Freundes-Link (Antwort verloren): already_friends statt used.
+select set_config('tests.mine', pg_temp.invite('friend'), true);
+select ok(pg_temp.redeem('carol', current_setting('tests.mine')) like '{%', 'carol löst Freundes-Link ein');
+select is(pg_temp.preview('carol', current_setting('tests.mine'))::jsonb - 'expiresAt', jsonb_build_object('status', 'already_friends',
+    'kind', 'friend', 'inviterId', tests.uid('alice'), 'inviterAlias', 'Alice 510'), 'eigener Freundes-Link: already_friends');
+select is(pg_temp.status('vera', current_setting('tests.mine')), 'used', 'für andere bleibt er used');
 
 -- invalid: unbekannt, Blockierung beide Richtungen, Ersteller nicht aktiv, Gast gelöscht bzw. redigiert – nur status.
 select is(pg_temp.preview('carol', repeat('0', 64)), '{"status": "invalid"}', 'unbekannt: nur {status: invalid}');
@@ -170,7 +177,7 @@ select is(pg_temp.status('alice', current_setting('tests.redacted')), 'invalid',
 -- S5: zweiter Claim-Link für Test1 zieht den ersten zurück.
 select set_config('tests.c1', pg_temp.invite('claim_player', '51100000-0000-4000-8000-000000000001'), true);
 select set_config('tests.c2', pg_temp.invite('claim_player', '51100000-0000-4000-8000-000000000001'), true);
-select is(pg_temp.status('carol', current_setting('tests.c1')), 'revoked', 'S5: alter Claim-Link revoked');
+select is(pg_temp.preview('carol', current_setting('tests.c1')), '{"status": "revoked"}', 'S5: alter Claim-Link nur {status: revoked}');
 select is(pg_temp.status('carol', current_setting('tests.c2')), 'ok', 'S5: neuer Claim-Link ok');
 select is((select count(*)::int from public.invites where player_id = '51100000-0000-4000-8000-000000000001'
    and used_at is null and revoked_at is null and expires_at > now()), 1, 'genau ein offener Claim-Link je Gast');
