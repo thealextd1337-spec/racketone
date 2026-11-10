@@ -268,11 +268,11 @@ Pfad: **Richtlinien → App-Inhalte**. Alle Punkte müssen vor dem geschlossenen
   update private.consent_versions set approved_at = now() where (document_type, version) = ('PRIVACY', '10');
   commit;
   ```
-  **App Links (ab 0.7.0):** `site/.well-known/assetlinks.json` enthält bisher nur den SHA-256 des **Upload-Keys** (§2,
-  gegen das 0.6.4-AAB geprüft). Der SHA-256 des **App-Signaturschlüssels** fehlt noch: Play Console → Testen und
-  veröffentlichen → App-Integrität → App-Signatur → „SHA-256-Zertifikatfingerabdruck“ kopieren und als zweiten Eintrag in
-  `sha256_cert_fingerprints` ergänzen. Ohne ihn verifiziert Android Play-Installationen **nicht**; Links öffnen dann die
-  Fallback-Seite `/i/` (Einfügen in „Freund hinzufügen“ funktioniert trotzdem). Prüfen mit
+  **App Links (ab 0.7.0):** `site/.well-known/assetlinks.json` enthält den SHA-256 des **Upload-Keys** (§2, gegen das
+  0.6.4-AAB geprüft, für lokal signierte Builds) und des **App-Signaturschlüssels** (`E9:F4:83:34:…:82:9A:A0`, aus Play
+  Console → App-Integrität → App-Signatur, eingetragen 10.11.2026, für Play-Installationen). Fehlt einer, verifiziert
+  Android die betreffenden Installationen **nicht**; Links öffnen dann die Fallback-Seite `/i/` (Einfügen in „Freund
+  hinzufügen“ funktioniert trotzdem). Prüfen mit
   `https://digitalassetlinks.googleapis.com/v1/statements:list?source.web.site=https://advantly.eu&relation=delegate_permission/common.handle_all_urls`
   und am Gerät `adb shell pm get-app-links eu.advantly` (Play-Installation, nicht seitenladen).
   Voraussetzung: Migration `20261018000200_consent_versions.sql` ist auf dem Projekt (Release-Gate).
