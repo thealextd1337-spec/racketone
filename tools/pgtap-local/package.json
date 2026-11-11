@@ -1,0 +1,13 @@
+{
+  "name": "advantly-pgtap-local",
+  "private": true,
+  "type": "module",
+  "description": "Dockerfreier pgTAP-Lauf gegen embedded Postgres 17 (nur Vorprüfung, maßgeblich ist CI)",
+  "scripts": {
+    "test": "node run.mjs"
+  },
+  "dependencies": {
+    "embedded-postgres": "17.10.0-beta.17",
+    "pg": "8.23.1"
+  }
+}

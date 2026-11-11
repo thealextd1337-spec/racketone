@@ -56,7 +56,15 @@ Schlanker Start wie in der CI (nur DB, Auth, Realtime, API):
 
 **Ohne Docker (Windows-Entwicklungsrechner):** Die Tests laufen zusätzlich in einem dockerfreien Harness gegen
 echtes Postgres 17 mit einem minimalen Supabase-Nachbau (Rollen `anon`/`authenticated`/`service_role`, `auth.uid()`,
-`realtime.messages/send/topic`) – nicht im Repo, nur zur Vorprüfung. Maßgeblich ist der CI-Job.
+`realtime.messages/send/topic`), nur zur Vorprüfung. Maßgeblich ist der CI-Job.
+
+```
+cd tools/pgtap-local && npm ci && cd ../..      # Git Bash, Node ≥ 18
+node tools/pgtap-local/run.mjs                 # alle pgTAP-Dateien (Filter auf Dateinamen: run.mjs 181,510)
+RACES=1 node tools/pgtap-local/run.mjs 000     # zusätzlich die Renntests aus CI (braucht `uv`)
+```
+Port, Datenordner und Fallstricke stehen im Kopf von `run.mjs`. 110 und `200_private_data_exports_platform`
+brauchen Storage, pg_cron und pg_net und werden lokal als SKIP übersprungen.
 
 ## Wire-Fixtures neu erzeugen
 

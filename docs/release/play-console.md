@@ -342,6 +342,7 @@ optional?“ → **Nein**). Optional bleiben nur Support-Meldungen und die per H
 | E-Mail-Adresse | Anmeldung per Mail-Code (bzw. Google), optionale Kontaktadresse in Support-Meldungen | Persönliche Infos → E-Mail-Adresse | nein (Konto Pflicht) | App-Funktionalität, Kontoverwaltung, Kommunikation des Entwicklers |
 | Alias, Benutzername, Spielernamen | Profil sowie Namen in Matches und Gästen | Persönliche Infos → Name | nein | App-Funktionalität, Kontoverwaltung |
 | Konto-ID, Freundescode | Profil | Persönliche Infos → Nutzer-IDs | nein | App-Funktionalität, Kontoverwaltung |
+| Freundesliste, Einladungen (wer wen eingeladen hat) | Freunde, Einladungslinks/QR | Kontakte → Kontakte (Googles Definition nennt „social graph information like usernames“; kein Adressbuch, keine `READ_CONTACTS`) | ja | App-Funktionalität |
 | Land, Altersgrenze, Zeitpunkt der Altersbestätigung (Geburtsdatum nur geprüft, nicht gespeichert) | Altersgate | Persönliche Infos → Sonstige Infos | nein | Kontoverwaltung, Betrugsprävention/Sicherheit/Compliance |
 | Installations- und Geräte-IDs (zufällig erzeugt), Plattform | Gerätebindung, Widerruf | Geräte- oder sonstige IDs | nein | App-Funktionalität, Betrugsprävention/Sicherheit |
 | Matches (Spielstand, Punkte, Zeitpunkte, optionaler Ort) | automatische Cloud-Sicherung (auch Uhr-Matches über das Handy) | Fitness → Fitness-Infos (vorsichtige Einordnung; Alternative „App-Aktivität → Andere nutzergenerierte Inhalte“) | nein | App-Funktionalität |
@@ -349,22 +350,26 @@ optional?“ → **Nein**). Optional bleiben nur Support-Meldungen und die per H
 | Technische Angaben (App-Version, OS, Gerätemodell, Bildschirm, Schriftgröße) | nur per Häkchen in Support-Meldungen | App-Info und -Leistung → Sonstige Leistungsdaten | ja | App-Funktionalität |
 | Abgleich Handy ↔ Uhr, Puls und Schritte | Data Layer, Ende-zu-Ende-verschlüsselt [P9]; nicht in die Cloud | – | – | **nicht erhoben** |
 
-- [ ] „Erhebt oder teilt deine App einen der erforderlichen Nutzerdatentypen?“ → **Ja**; Typen und Zwecke wie in der Tabelle, jeweils **erhoben, nicht geteilt**, **nicht ephemer**.
-- [ ] „Werden alle Nutzerdaten bei der Übertragung verschlüsselt?“ → **Ja** (TLS).
-- [ ] „Können Nutzer das Löschen ihrer Daten anfordern?“ → **Ja**: in der App (Profil → Konto & Datenschutz → Kontolöschung beantragen) und per Web-Link
+**Stand 11.11.2026:** in der Console geprüft (9 Datentypen). Am selben Tag „Kontakte“ ergänzt (erhoben, nicht geteilt, nicht
+sitzungsspezifisch, optional, App-Funktionen) und zur Prüfung eingereicht; jetzt **10 Datentypen** (Tabelle oben samt Gesundheitsdaten ab 0.5.0).
+- [x] „Erhebt oder teilt deine App einen der erforderlichen Nutzerdatentypen?“ → **Ja**; Typen und Zwecke wie in der Tabelle, jeweils **erhoben, nicht geteilt**, **nicht ephemer**.
+- [x] „Werden alle Nutzerdaten bei der Übertragung verschlüsselt?“ → **Ja** (TLS).
+- [x] „Können Nutzer das Löschen ihrer Daten anfordern?“ → **Ja**: in der App (Profil → Konto & Datenschutz → Kontolöschung beantragen) und per Web-Link
   **`https://advantly.eu/konto-loeschen.html`** (Feld „Link zum Löschen des Kontos“; englisch `https://advantly.eu/en/delete-account.html`).
 - IP-Adressen landen nur als ungesalzener Hash (Missbrauchsschutz bei Altersgate und Gastmeldungen) sowie in den Verbindungslogs der Anbieter; daraus wird kein Standort abgeleitet.
 - Android-Datensicherung (Phone `allowBackup=true`) ist eine Systemfunktion im Google-Konto des Nutzers und keine Übertragung an uns. In der Datenschutzerklärung (§7) ist sie erwähnt. Seit 0.5.0 ist die App-Datenbank (Matches, Pulsverläufe) auf Handy und Uhr davon ausgenommen.
 - Absturzdaten (Android vitals) erhebt Google über das System bzw. Play mit Zustimmung des Nutzers, nicht unser App-Code. Es ist kein SDK eingebunden.
 - **0.2.0 (Freunde, geteilte Matches, Google-Login):** Datentypen bleiben gleich (Alias, Benutzername, Freundescode und
-  Freundesliste fallen unter Name/Nutzer-IDs; geteilte Matches unter Fitness-Infos). Die Sichtbarkeit für andere Nutzer der App
+  Freundesliste fallen unter Name/Nutzer-IDs; geteilte Matches unter Fitness-Infos). **Seit 11.11.2026** steht die
+  Freundesliste zusätzlich unter „Kontakte“ (siehe Tabelle). Die Sichtbarkeit für andere Nutzer der App
   ist **kein „Teilen“** im Sinne von Play (keine Weitergabe an Drittunternehmen). Kontoerstellung zusätzlich **„OAuth“** ankreuzen
   (Google-Login), weiterhin „Nutzername und andere Authentifizierung“ (E-Mail-Code). Die Einstellung „Puls & Schritte“ ist eine
   Präferenz, keine Gesundheitsinfo; Puls- und Schrittwerte bleiben **nicht erhoben**.
 - **Neu ausfüllen, sobald** Push, Live-Zuschauer oder Health-Daten in der Cloud dazukommen.
 - **0.7.0 (Einladungslinks, QR, Gast übernehmen):** keine neue Datenart. Einladungen (Hash, Art, Ablauf, Einlöser) fallen
   unter Nutzer-IDs/Freundesliste, Gastnamen unter Name. Kein In-App-Scanner (kein ML Kit), keine Kamera-Berechtigung: QR wird
-  mit der System-Kamera gescannt. Formular bleibt unverändert.
+  mit der System-Kamera gescannt. Formular blieb zunächst unverändert; **seit 11.11.2026** stehen Freundesliste und
+  Einladungsgraph unter „Kontakte“ (siehe Tabelle).
   In P3 kommen Puls und kcal dazu, sobald sie in die Cloud **synchronisiert** werden („Gesundheitsinfo/Fitness-Info“, Zweck App-Funktionalität, nicht geteilt).
   **Rein lokales Speichern** von Puls oder kcal auf Uhr bzw. Handy ist **keine** Erhebung.
   Ob das Schreiben nach Health Connect auf demselben Gerät eine Angabe auslöst, vor P3 prüfen. Unabhängig davon ist Health Connect eigens zu deklarieren (§6.7).
@@ -402,24 +407,28 @@ Die Kategorie „Aktivität und Fitness“ umfasst ausdrücklich „tracking bod
 ### 6.8 Vordergrunddienst-Berechtigungen (FGS-Erklärung)
 Apps mit targetSdk ≥ 34 müssen jeden FGS-Typ deklarieren, und zwar mit Beschreibung, Auswirkung bei Verzögerung oder Unterbrechung, **Video-Link** und Anwendungsfall [P11].
 Typ `health` ist für Fitness-Apps gedacht, z. B. „an exercise app that tracks a user's exercise“ [P11].
-- [ ] **Typ:** Gesundheit (`FOREGROUND_SERVICE_HEALTH`), nur Wear-App (`WorkoutService`).
-- [ ] **Anwendungsfall:** den Eintrag zum Erfassen eines Trainings bzw. von Fitnessdaten wählen.
-- [ ] **Beschreibung:** „Während eines vom Nutzer gestarteten Matches hält ein Vordergrunddienst die Health-Services-Trainings-Session (ExerciseClient) aktiv. So läuft die Zählung bei ausgeschaltetem Display weiter, die Herzfrequenz wird angezeigt und eine Ongoing Activity führt zurück ins Match. Der Dienst endet mit dem Match.“
-- [ ] **Auswirkung bei Unterbrechung:** „Wird der Dienst verzögert oder beendet, bricht die Trainings-Session ab: Puls- und Dauermessung fehlen für den Rest des Matches, und die Uhr kann die App bei ausgeschaltetem Display beenden. Ein laufendes Match wäre nur nach Wiederherstellung fortsetzbar.“
-- [ ] **Video** (Pflicht, z. B. nicht gelistetes YouTube-Video oder Google-Drive-Link mit Freigabe „Jeder mit dem Link“):
+
+**Stand 04.11.2026: eingereicht.** „Gesundheit“ mit dem vorhandenen YouTube-Short, „Verbundenes Gerät“ mit Video auf
+Google Drive (Freigabe „Jeder mit dem Link“, lokale Kopie unter `H:/dev/releases/fgs-video/v2`). Neu einreichen nur, wenn
+sich FGS-Typen oder ihr Zweck ändern.
+- [x] **Typ:** Gesundheit (`FOREGROUND_SERVICE_HEALTH`), nur Wear-App (`WorkoutService`).
+- [x] **Anwendungsfall:** den Eintrag zum Erfassen eines Trainings bzw. von Fitnessdaten wählen.
+- [x] **Beschreibung:** „Während eines vom Nutzer gestarteten Matches hält ein Vordergrunddienst die Health-Services-Trainings-Session (ExerciseClient) aktiv. So läuft die Zählung bei ausgeschaltetem Display weiter, die Herzfrequenz wird angezeigt und eine Ongoing Activity führt zurück ins Match. Der Dienst endet mit dem Match.“
+- [x] **Auswirkung bei Unterbrechung:** „Wird der Dienst verzögert oder beendet, bricht die Trainings-Session ab: Puls- und Dauermessung fehlen für den Rest des Matches, und die Uhr kann die App bei ausgeschaltetem Display beenden. Ein laufendes Match wäre nur nach Wiederherstellung fortsetzbar.“
+- [x] **Video** (Pflicht, z. B. nicht gelistetes YouTube-Video oder Google-Drive-Link mit Freigabe „Jeder mit dem Link“):
   App auf der Uhr öffnen → Sportart wählen → Match starten → Berechtigungsdialog → Punkte zählen → Display aus/an → Ongoing-Activity-Symbol → Match beenden (Dienst endet).
   Aufnahme auf der Uhr: `adb -s <uhr> shell screenrecord /sdcard/fgs.mp4` (Strg+C beendet) → `adb -s <uhr> pull /sdcard/fgs.mp4`.
   Alternativ die Uhr am Handgelenk filmen.
 
 **Ab 0.6.0 zusätzlich Handy-App: Typ „Verbundenes Gerät“ (`FOREGROUND_SERVICE_CONNECTED_DEVICE`, `LiveRelayService`)**
-- [ ] **Beschreibung:** „Zählt der Nutzer ein Match auf seiner gekoppelten Wear-OS-Uhr und verfolgen Mitspieler oder
+- [x] **Beschreibung:** „Zählt der Nutzer ein Match auf seiner gekoppelten Wear-OS-Uhr und verfolgen Mitspieler oder
   Zuschauer es live, hält ein Vordergrunddienst auf dem Handy die Verbindung zur zählenden Uhr aufrecht und überträgt
   deren Spielstand etwa alle 10 Sekunden. Der Dienst startet nur, wenn der Nutzer das Match am Handy startet bzw. die App
   geöffnet ist, zeigt dauerhaft die Benachrichtigung ‚Live-Stand wird übertragen‘ und endet bei Pause, Matchende oder
   Übergabe des Zählens.“
-- [ ] **Folgen bei Verzögerung oder Unterbrechung:** Der Live-Stand beim Mitspieler veraltet um Minuten. Lokal geht nichts
+- [x] **Folgen bei Verzögerung oder Unterbrechung:** Der Live-Stand beim Mitspieler veraltet um Minuten. Lokal geht nichts
   verloren.
-- [ ] **Video (Pflicht):** Uhr-Verbindung/-Status in der App → Match am Handy starten mit „Meine Uhr“ zählt → Punkte auf der
+- [x] **Video (Pflicht):** Uhr-Verbindung/-Status in der App → Match am Handy starten mit „Meine Uhr“ zählt → Punkte auf der
   Uhr → Benachrichtigung „Live-Stand wird übertragen“ → Stand beim Mitspieler (optional). Aufnahme per WLAN-Debugging
   (`adb shell screenrecord`, siehe Memory „Geräte per WLAN-Debugging“).
 - Zusätzliche Berechtigungen ohne Deklaration: `FOREGROUND_SERVICE`, `CHANGE_NETWORK_STATE` (Pflicht für diesen Typ ab
@@ -557,6 +566,13 @@ Den Workflow starten können nur Personen mit Schreibrechten. Der Keystore wird 
 - [ ] `gradlew.bat check bundleAllRelease`
 - [ ] Notes gegen Build geprüft (beide Formfaktoren und Sprachen, Zieltrack-Dateien; [Plan §7](veroeffentlichungsplan.md#7-release-notes-vorlage-und-erster-interner-test))
 - [ ] Ändern sich Berechtigungen, Datenflüsse oder Health-Typen: §6.6–6.8 und `site/app-datenschutz.html` / `site/en/app-privacy.html` anpassen (Kommentare „ÜBERARBEITEN vor Phase 2/3“).
+
+**Lehren aus 0.6.x und 0.7.0**
+- PRIVACY-Fassung nach der Freigabe im Katalog prüfen: genau eine Zeile mit `is_current`, `approved_at` gesetzt.
+- Bundles nur aus einem sauberen Commit bauen, Handy und Uhr gemeinsam. Sonst zeigt der Uhr-Status „Entwicklungsbuild“.
+- Während eines Uploads nur einen Console-Tab offen haben und keinen Entwurf verwerfen. Ein gelöschter Entwurf verbrennt
+  den hochgeladenen versionCode („The draft release associated with the upload was deleted“, Wear 132 bei 0.6.1).
+- Der Bestätigungsdialog „Änderung bei Google Play veröffentlichen?“ erscheint nur im sichtbaren Browser-Tab.
 
 ---
 
