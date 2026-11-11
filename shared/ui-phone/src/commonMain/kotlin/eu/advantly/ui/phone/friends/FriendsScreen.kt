@@ -93,6 +93,7 @@ import eu.advantly.ui.phone.resources.friends_not_found
 import eu.advantly.ui.phone.resources.friends_outgoing_title
 import eu.advantly.ui.phone.resources.friends_query_hint
 import eu.advantly.ui.phone.resources.friends_query_label
+import eu.advantly.ui.phone.resources.friends_record
 import eu.advantly.ui.phone.resources.friends_remove
 import eu.advantly.ui.phone.resources.friends_remove_explanation
 import eu.advantly.ui.phone.resources.friends_requests_empty
@@ -153,6 +154,8 @@ fun FriendsScreen(
     link: PushTarget? = null,
     onLinkHandled: () -> Unit = {},
     invitations: InvitationsViewModel? = null,
+    /** Bilanz mit/gegen den Freund (Konto-ID); ohne Verlauf (Vorschau) keine Schaltfläche. */
+    onOpenRecord: ((String) -> Unit)? = null,
 ) {
     val state by model.state.collectAsState()
     // Neuer Freund bei offenem QR: Code wurde eingelöst, der nächste ist fällig (plan-einladungen §1.2).
@@ -272,6 +275,11 @@ fun FriendsScreen(
                 if (state.friends.isEmpty()) Text(stringResource(Res.string.friends_empty), color = colors.text2)
                 state.friends.forEach { friend ->
                     Person(friend) {
+                        onOpenRecord?.let { open ->
+                            TextButton({ open(friend.profileId) }, modifier = Modifier.testTag("friends_record_${friend.profileId}")) {
+                                Text(stringResource(Res.string.friends_record))
+                            }
+                        }
                         TextButton(
                             { confirm = Confirm(ConfirmKind.REMOVE, friend.profileId, friend.alias) },
                             enabled = !state.busy,

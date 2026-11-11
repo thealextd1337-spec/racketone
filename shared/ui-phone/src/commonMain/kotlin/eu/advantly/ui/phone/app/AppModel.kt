@@ -59,6 +59,11 @@ sealed interface Overlay {
         val playerId: PlayerId,
     ) : Overlay
 
+    /** Bilanz mit einem Freund über sein Konto (alle Spieler-IDs, unter denen er in Matches steht). */
+    data class FriendHistory(
+        val profile: String,
+    ) : Overlay
+
     data class Result(
         val matchId: MatchId,
     ) : Overlay
