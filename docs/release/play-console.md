@@ -351,8 +351,7 @@ optional?“ → **Nein**). Optional bleiben nur Support-Meldungen und die per H
 | Abgleich Handy ↔ Uhr, Puls und Schritte | Data Layer, Ende-zu-Ende-verschlüsselt [P9]; nicht in die Cloud | – | – | **nicht erhoben** |
 
 **Stand 11.11.2026:** in der Console geprüft (9 Datentypen). Am selben Tag „Kontakte“ ergänzt (erhoben, nicht geteilt, nicht
-sitzungsspezifisch, optional, App-Funktionen) und zur Prüfung eingereicht; jetzt **10 Datentypen** wie in der Tabelle oben
-plus Gesundheitsdaten (ab 0.5.0).
+sitzungsspezifisch, optional, App-Funktionen) und zur Prüfung eingereicht; jetzt **10 Datentypen** (Tabelle oben samt Gesundheitsdaten ab 0.5.0).
 - [x] „Erhebt oder teilt deine App einen der erforderlichen Nutzerdatentypen?“ → **Ja**; Typen und Zwecke wie in der Tabelle, jeweils **erhoben, nicht geteilt**, **nicht ephemer**.
 - [x] „Werden alle Nutzerdaten bei der Übertragung verschlüsselt?“ → **Ja** (TLS).
 - [x] „Können Nutzer das Löschen ihrer Daten anfordern?“ → **Ja**: in der App (Profil → Konto & Datenschutz → Kontolöschung beantragen) und per Web-Link
