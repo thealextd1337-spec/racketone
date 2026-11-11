@@ -342,6 +342,7 @@ optional?“ → **Nein**). Optional bleiben nur Support-Meldungen und die per H
 | E-Mail-Adresse | Anmeldung per Mail-Code (bzw. Google), optionale Kontaktadresse in Support-Meldungen | Persönliche Infos → E-Mail-Adresse | nein (Konto Pflicht) | App-Funktionalität, Kontoverwaltung, Kommunikation des Entwicklers |
 | Alias, Benutzername, Spielernamen | Profil sowie Namen in Matches und Gästen | Persönliche Infos → Name | nein | App-Funktionalität, Kontoverwaltung |
 | Konto-ID, Freundescode | Profil | Persönliche Infos → Nutzer-IDs | nein | App-Funktionalität, Kontoverwaltung |
+| Freundesliste, Einladungen (wer wen eingeladen hat) | Freunde, Einladungslinks/QR | Kontakte → Kontakte (Googles Definition nennt „social graph information like usernames“; kein Adressbuch, keine `READ_CONTACTS`) | ja | App-Funktionalität |
 | Land, Altersgrenze, Zeitpunkt der Altersbestätigung (Geburtsdatum nur geprüft, nicht gespeichert) | Altersgate | Persönliche Infos → Sonstige Infos | nein | Kontoverwaltung, Betrugsprävention/Sicherheit/Compliance |
 | Installations- und Geräte-IDs (zufällig erzeugt), Plattform | Gerätebindung, Widerruf | Geräte- oder sonstige IDs | nein | App-Funktionalität, Betrugsprävention/Sicherheit |
 | Matches (Spielstand, Punkte, Zeitpunkte, optionaler Ort) | automatische Cloud-Sicherung (auch Uhr-Matches über das Handy) | Fitness → Fitness-Infos (vorsichtige Einordnung; Alternative „App-Aktivität → Andere nutzergenerierte Inhalte“) | nein | App-Funktionalität |
@@ -349,7 +350,8 @@ optional?“ → **Nein**). Optional bleiben nur Support-Meldungen und die per H
 | Technische Angaben (App-Version, OS, Gerätemodell, Bildschirm, Schriftgröße) | nur per Häkchen in Support-Meldungen | App-Info und -Leistung → Sonstige Leistungsdaten | ja | App-Funktionalität |
 | Abgleich Handy ↔ Uhr, Puls und Schritte | Data Layer, Ende-zu-Ende-verschlüsselt [P9]; nicht in die Cloud | – | – | **nicht erhoben** |
 
-**Stand 11.11.2026:** in der Console geprüft, 9 Datentypen wie in der Tabelle oben plus Gesundheitsdaten (ab 0.5.0), für 0.7.0 unverändert.
+**Stand 11.11.2026:** in der Console geprüft, 9 Datentypen wie in der Tabelle oben plus Gesundheitsdaten (ab 0.5.0). Am selben Tag
+„Kontakte“ ergänzt (erhoben, nicht geteilt, nicht sitzungsspezifisch, optional, App-Funktionen) und zur Prüfung eingereicht.
 - [x] „Erhebt oder teilt deine App einen der erforderlichen Nutzerdatentypen?“ → **Ja**; Typen und Zwecke wie in der Tabelle, jeweils **erhoben, nicht geteilt**, **nicht ephemer**.
 - [x] „Werden alle Nutzerdaten bei der Übertragung verschlüsselt?“ → **Ja** (TLS).
 - [x] „Können Nutzer das Löschen ihrer Daten anfordern?“ → **Ja**: in der App (Profil → Konto & Datenschutz → Kontolöschung beantragen) und per Web-Link
