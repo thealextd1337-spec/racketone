@@ -13,6 +13,7 @@ import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -135,10 +136,13 @@ class FriendsScreenTest {
                 val port = UiFriends()
                 val model = FriendsViewModel(auth, port, { if (it == "alice") local else emptyList() }, null, scope)
                 val shared = mutableListOf<String>()
+                val records = mutableListOf<String>()
                 port.failure = "connection_failed"
                 setContent {
                     CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
-                        AdvantlyTheme(darkTheme = false) { FriendsScreen(model, onOpenAccount = {}, onShareText = { shared += it }) }
+                        AdvantlyTheme(darkTheme = false) {
+                            FriendsScreen(model, onOpenAccount = {}, onShareText = { shared += it }, onOpenRecord = { records += it })
+                        }
                     }
                 }
                 try {
@@ -157,6 +161,11 @@ class FriendsScreenTest {
                     onNodeWithTag("friends_found").assertTextContains("Bob Builder · @bob_99")
                     click("friends_send")
                     onNodeWithTag("friends_request_result").assertTextContains("Friend request sent.")
+
+                    // Bilanz mit/gegen den Freund über sein Konto.
+                    onNodeWithTag("friends_record_anna").performScrollTo().assertTextEquals("Record")
+                    click("friends_record_anna")
+                    assertEquals(listOf("anna"), records)
 
                     // Entfernen braucht eine Rückfrage; Abbrechen ändert nichts.
                     click("friends_remove_anna")

@@ -57,8 +57,9 @@ typealias PlayerAssignmentFailure = eu.advantly.match.session.PlayerAssignmentFa
  *   die UI zeigt dann „Du“)
  * @property assignedPlayers ursprüngliche Platz-ID → zugewiesene Person; Score und Rotation behalten die Platz-ID
  * @property previousMatchId verknüpftes Vor-Match bei „Noch einer in gleicher Besetzung?“ (02 §5.2)
- * @property linkedProfiles Gast-ID → Freundeskonto, mit dem der Server genau diesen Platz verknüpft hat (Gast-Zuordnung,
- *   plan-0.6.3 §3.5); nur zur Anzeige des Freundesnamens, ohne Eintrag bleibt der Gastname
+ * @property linkedProfiles Person (Spieler-ID) → fremdes Konto dahinter in genau diesem Match: Ersteller, eingetragener
+ *   Freund oder zugeordneter Gast (plan-0.6.3 §3.5). Für den Freundesnamen und die Bilanz mit Freunden; ohne Eintrag ist
+ *   die Person nur lokal bekannt (Gastname bleibt)
  * @property ownSlots Plätze, auf denen der Besitzer selbst steht (Self-Player, Alias, zugewiesen oder per Server mit dem
  *   eigenen Konto verknüpft); leer, wenn unbekannt
  */

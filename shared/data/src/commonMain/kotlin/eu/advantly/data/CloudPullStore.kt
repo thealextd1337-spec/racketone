@@ -175,22 +175,23 @@ class CloudPullStore internal constructor(
     }
 
     /**
-     * Plätze des gezogenen Matches [matchId], die der Server per Gast-Zuordnung (`assign_player`, plan-0.6.3 §3.5) mit
-     * einem Freundeskonto verknüpft hat: Spieler-ID → Konto. Übersprungene (Freund schon im Match), abgelehnte und
-     * gelöschte Plätze fehlen; nur zur Anzeige des Freundesnamens.
+     * Fremde Konten hinter den Plätzen des gezogenen Matches [matchId]: Spieler-ID (bzw. Platz-ID, wenn der Server keine
+     * Spieler-ID liefert) → Konto. Gilt für Ersteller, eingetragene Freunde und zugeordnete Gäste (plan-0.6.3 §3.5);
+     * übersprungene, abgelehnte („War ich nicht“) und gelöschte Plätze sowie das eigene Konto fehlen. `null` ohne
+     * Snapshot – dann weiß der Pull nichts über dieses Match.
      */
-    fun assignedParticipants(
+    fun linkedParticipants(
         profileId: String,
         matchId: String,
-    ): Map<String, String> =
-        participants(profileId, matchId)
-            .mapNotNull { participant ->
-                val linked = participant.text("linkStatus") in setOf("assigned", "confirmed")
+    ): Map<String, String>? =
+        participantsOrNull(profileId, matchId)
+            ?.mapNotNull { participant ->
+                val linked = participant.text("linkStatus") in LINKED_STATUSES
                 val deleted = (participant["deletedProfile"] as? JsonPrimitive)?.booleanOrNull == true
-                val player = participant.text("playerId")
+                val key = participant.text("playerId") ?: participant.text("slotId")
                 val profile = participant.text("profileId")
-                if (linked && !deleted && player != null && profile != null) player to profile else null
-            }.toMap()
+                if (linked && !deleted && key != null && profile != null && profile != profileId) key to profile else null
+            }?.toMap()
 
     /**
      * Plätze (Lineup-IDs) des gezogenen Matches [matchId], die der Server mit dem eigenen Konto [profileId] verknüpft hat
@@ -207,8 +208,13 @@ class CloudPullStore internal constructor(
     private fun participants(
         profileId: String,
         matchId: String,
-    ): List<JsonObject> {
-        val json = snapshot(profileId, CloudPullEntityKind.MATCH, matchId)?.json ?: return emptyList()
+    ): List<JsonObject> = participantsOrNull(profileId, matchId).orEmpty()
+
+    private fun participantsOrNull(
+        profileId: String,
+        matchId: String,
+    ): List<JsonObject>? {
+        val json = snapshot(profileId, CloudPullEntityKind.MATCH, matchId)?.json ?: return null
         val participants =
             runCatching { (DataJson.parseToJsonElement(json) as? JsonObject)?.get("participants") as? JsonArray }.getOrNull()
         return participants.orEmpty().filterIsInstance<JsonObject>()
@@ -839,6 +845,9 @@ class CloudPullStore internal constructor(
         const val METADATA_STREAM: String = "pull"
         const val EVENT_REQUESTS_PER_METADATA_TURN: Long = 12
         private const val MISSING_PAGE = 200L
+
+        /** Server-Status mit gesetztem Konto (`20261015000200`): Ersteller, Freund, zugeordneter bzw. bestätigter Gast. */
+        private val LINKED_STATUSES = setOf("self", "linked", "assigned", "confirmed")
 
         // Platz für wachsende Cursorziffern zwischen Messung und endgültiger Seite.
         private const val CURSOR_SLACK = 64

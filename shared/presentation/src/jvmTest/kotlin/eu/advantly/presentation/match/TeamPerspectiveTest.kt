@@ -172,6 +172,10 @@ class TeamPerspectiveTest {
         assertEquals(alexRole, people.single { it.player.id.value == "alex" }.role, "Rolle von Alex")
         val h2h = headToHead(listOf(summary), PlayerId("alex"), alexRole, setOf(PlayerId("jonas")))
         assertEquals(if (won) 1 to 0 else 0 to 1, h2h.wins to h2h.losses, "Bilanz mit/gegen Alex")
+        // Bilanz mit dem Freund über sein Konto: Alex' eigener Platz trägt im Pull sein Konto „A“.
+        assertEquals("A", people.single { it.player.id.value == "alex" }.profile, "Konto hinter Alex")
+        val friend = headToHead(listOf(summary), "A", alexRole, setOf(PlayerId("jonas")))
+        assertEquals(h2h.wins to h2h.losses, friend.wins to friend.losses, "Freundes-Bilanz mit/gegen Alex")
     }
 
     /** Vor dem Fix: B gewinnt, Jonas (B) sah eine Niederlage, 0 Games und Alex als „Partner“. */

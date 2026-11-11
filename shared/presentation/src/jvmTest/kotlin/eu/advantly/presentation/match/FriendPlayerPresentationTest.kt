@@ -67,6 +67,15 @@ class FriendPlayerPresentationTest {
                 ?.player(bob.id)
                 ?.displayName,
         )
+        // Noch nicht abgeglichen (kein Pull-Snapshot): Das Konto hinter Bob kommt aus dem Freund-Eintrag (Bilanz mit Freunden).
+        assertEquals(
+            mapOf(bob.id to "bob-profile"),
+            store
+                .record(id)
+                ?.summary
+                ?.setup
+                ?.linkedProfiles,
+        )
         // Lineup, Header und Event-Payloads (Grundlage von Uhr-Nachrichten und Export) kennen nur die lokale ID.
         assertFalse(
             data.matches

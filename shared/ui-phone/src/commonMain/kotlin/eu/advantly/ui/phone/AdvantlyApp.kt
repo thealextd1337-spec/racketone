@@ -338,7 +338,11 @@ fun AdvantlyApp(
                         ResultScreen(
                             record = record,
                             statisticsCache = model.statistics,
-                            headToHead = { setup -> HeadToHeadLinks(setup) { navigator.push(Overlay.PlayerHistory(it)) } },
+                            headToHead = { setup ->
+                                HeadToHeadLinks(setup) { person ->
+                                    navigator.push(person.profile?.let(Overlay::FriendHistory) ?: Overlay.PlayerHistory(person.player.id))
+                                }
+                            },
                             playerAssignments = {
                                 PlaceholderAssignments(
                                     it.summary.matchId,
@@ -422,6 +426,10 @@ fun AdvantlyApp(
                                     ?.displayName
                                     .orEmpty(),
                         )
+                    }
+
+                    is Overlay.FriendHistory -> {
+                        HeadToHeadScreen(null, model.history, { navigator.pop() }, model::openResult, profile = top.profile)
                     }
 
                     null -> {
@@ -533,6 +541,7 @@ private fun TabLayer(
                                 link = pushTarget,
                                 onLinkHandled = onPushTargetHandled,
                                 invitations = authModel?.invitations,
+                                onOpenRecord = { navigator.push(Overlay.FriendHistory(it)) },
                             )
                         }
                     }

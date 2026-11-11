@@ -763,7 +763,15 @@ class SessionMatchStore(
         return LiveMatchSnapshot(
             matchId = m.id,
             setup =
-                MatchSetup(m.format, m.lineup, m.meta, playersOf(m.lineup, m.id), m.previousMatchId, assignmentsOf(m.id), linkedOf(m.id)),
+                MatchSetup(
+                    m.format,
+                    m.lineup,
+                    m.meta,
+                    playersOf(m.lineup, m.id),
+                    m.previousMatchId,
+                    assignmentsOf(m.id),
+                    linkedOf(m.id, m.lineup),
+                ),
             state = m.state,
             canUndo = m.canUndo,
             canRedo = m.canRedo,
@@ -1018,17 +1026,29 @@ class SessionMatchStore(
             playersOf(record.lineup, record.id),
             record.previousMatchId,
             assigned,
-            linkedOf(record.id),
+            linkedOf(record.id, record.lineup),
             own,
         )
     }
 
-    /** Gast-Zuordnungen dieses Matches laut Pull (plan-0.6.3 §3.5), nicht global je Gast: übersprungene Matches fehlen. */
-    private fun linkedOf(matchId: MatchId): Map<PlayerId, String> =
-        data.accountIdentities.profile
-            ?.let { profile -> data.cloudPulls.assignedParticipants(profile, matchId.value) }
-            .orEmpty()
-            .mapKeys { PlayerId(it.key) }
+    /**
+     * Fremde Konten hinter den Personen dieses Matches (Bilanz mit Freunden, Freundesname): laut Pull, sobald es einen
+     * Snapshot gibt – nur so wirken Überspringen und „War ich nicht“. Ohne Snapshot (eigenes Match, noch nicht abgeglichen)
+     * nur per Assistent eingetragene Freunde; die globale Gast-Zuordnung nicht, sie kennt übersprungene Matches nicht.
+     */
+    private fun linkedOf(
+        matchId: MatchId,
+        lineup: Lineup,
+    ): Map<PlayerId, String> {
+        val profile = data.accountIdentities.profile ?: return emptyMap()
+        data.cloudPulls.linkedParticipants(profile, matchId.value)?.let { linked -> return linked.mapKeys { PlayerId(it.key) } }
+        // Schlüssel wie in historyPeople: die aufgelöste Person, auch bei nachträglich zugewiesenem Platzhalter.
+        val assigned = data.assignments(matchId)
+        return (lineup.a + lineup.b)
+            .map { slot -> assigned[slot]?.id ?: slot }
+            .mapNotNull { id -> data.players.friendProfile(profile, id)?.let { id to it } }
+            .toMap()
+    }
 
     private fun playersOf(
         lineup: Lineup,

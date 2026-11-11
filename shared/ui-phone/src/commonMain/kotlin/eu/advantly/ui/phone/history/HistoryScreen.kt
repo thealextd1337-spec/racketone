@@ -112,7 +112,8 @@ fun HistoryScreen(
                         it.setup,
                         selfIds,
                     )
-                }.distinctBy { it.player.id to it.role }
+                }.filter { it.player.displayName.isNotBlank() }
+                .distinctBy { it.player.id to it.role }
                 .sortedBy { it.player.displayName.lowercase() }
         }
     val offeredPeople = people.filter { role == null || it.role == role }.distinctBy { it.player.id }

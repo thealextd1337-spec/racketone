@@ -52,6 +52,49 @@ class MatchHistoryTest {
     }
 
     @Test
+    fun friendRecordJoinsAllPlayerIdsOfTheSameAccountPerRole() {
+        val (opp1, opp2) = setup.lineup.b
+        val partner = setup.lineup.a.last()
+
+        fun linked(
+            summary: eu.advantly.presentation.match.MatchSummary,
+            vararg links: Pair<PlayerId, String>,
+        ) = summary.copy(setup = summary.setup.copy(linkedProfiles = links.toMap()))
+        val matches =
+            listOf(
+                // Anna einmal als Gegnerin 1, einmal als Gegnerin 2 (andere Spieler-ID), einmal als Partnerin.
+                linked(match(ResultReason.COMPLETED, date = 1), opp1 to "anna"),
+                linked(match(ResultReason.COMPLETED, Side.B, date = 2), opp2 to "anna"),
+                linked(match(ResultReason.COMPLETED, date = 3), partner to "anna", opp1 to "ben"),
+                // Ohne Verknüpfung zählt das Match nicht für Anna, auch nicht über dieselbe Spieler-ID.
+                match(ResultReason.COMPLETED, date = 4),
+                // Abbruch zählt nie.
+                linked(match(ResultReason.ABANDONED, null, date = 5), opp1 to "anna"),
+            )
+        val against = headToHead(matches, "anna", HistoryRole.OPPONENT, selfIds)
+        assertEquals(Triple(1, 1, 0), Triple(against.wins, against.losses, against.draws))
+        assertEquals(listOf(2L, 1L), against.recent.map { it.finishedAtMs })
+        val with = headToHead(matches, "anna", HistoryRole.PARTNER, selfIds)
+        assertEquals(Triple(1, 0, 0), Triple(with.wins, with.losses, with.draws))
+        assertEquals(1, headToHead(matches, "ben", HistoryRole.OPPONENT, selfIds).total)
+        assertEquals(0, headToHead(matches, "carl", HistoryRole.OPPONENT, selfIds).total)
+        assertEquals("anna", historyPeople(matches.first().setup, selfIds).first { it.player.id == opp1 }.profile)
+    }
+
+    @Test
+    fun placeholderCountsForTheAccountTheServerLinkedToIt() {
+        val opponent = setup.lineup.b.first()
+        val base = match(ResultReason.COMPLETED)
+        val placeholder =
+            base.setup.copy(players = base.setup.players.map { if (it.id == opponent) Player(opponent, "", isPlaceholder = true) else it })
+        val unlinked = base.copy(setup = placeholder)
+        val linked = base.copy(setup = placeholder.copy(linkedProfiles = mapOf(opponent to "anna")))
+        // Ohne Konto bleibt ein Platzhalter keine Person; mit Konto (im Match eines anderen besetzt) zählt er für Anna.
+        assertTrue(historyPeople(unlinked.setup, selfIds).none { it.player.id == opponent })
+        assertEquals(1, headToHead(listOf(linked), "anna", HistoryRole.OPPONENT, selfIds).total)
+    }
+
+    @Test
     fun filterCombinesSportNamePersonAndRole() {
         val padel = match(ResultReason.COMPLETED)
         val tennis = padel.copy(setup = padel.setup.copy(format = Presets.TENNIS_ONE_SET.format()))
