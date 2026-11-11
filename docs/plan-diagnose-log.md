@@ -1,6 +1,8 @@
 # Plan: Diagnose-Log für Support-Tickets
 
-> Status: Entwurf 01.11.2026 · Basis `origin/main` c6a99427 (0.4.2) · Branch `w9/diagnose-log`
+> Status: **zurückgestellt** (Entscheidung 11.11.2026, Stand 0.7.0) · Entwurf 01.11.2026 auf Basis 0.4.2 (c6a99427)
+> Umsetzen erst zusammen mit einem Release, das ohnehin eine neue PRIVACY-Fassung braucht (Health-Export oder Turnier T1).
+> Bis 0.7.0 ist nichts davon umgesetzt. Datei- und Zeilenangaben stammen aus 0.4.2 und sind vor dem Start neu zu prüfen.
 > Bezug: [Feedback & Admin](plan-feedback-admin.md), [Support-Betrieb](support-admin-betrieb.md), [01 §2.2](01-architektur.md)
 
 ## 1. Ziel und Abgrenzung
@@ -23,8 +25,8 @@ nichts, die Suche kostete Stunden. Zwei Logzeilen hätten gereicht.
   außer dem Abruf beim Ticket.
 - **Abschalten:** Ein Schalter kommt nur, wenn die Messung in §7 Mehrverbrauch zeigt. Dann wird er als kleines eigenes Paket nachgerüstet (§7).
 - **Ersetzt bewusst** den Satz „keine … vollständigen Logs anhängen“ aus [Feedback & Admin](plan-feedback-admin.md).
-  Grund: Das begrenzte, bereinigte Log mit Vorschau ist etwas anderes als ein Rohlog. Diese Datei wird beim
-  Merge mit angepasst.
+  Grund: Das begrenzte, bereinigte Log mit Vorschau ist etwas anderes als ein Rohlog. Diese Datei wird bei der
+  Umsetzung mit angepasst.
 
 **Nicht im Umfang:** Crash-Reporting-Dienste (Crashlytics/Sentry), Remote-Logging ohne Ticket, Screenshots,
 Logs an Uhren ohne Handy (Uhren haben kein Internet, Tickets gibt es nur am Handy).
@@ -228,10 +230,10 @@ also gehen alle iPhone-Tickets als Gast. Der Log-RPC muss deshalb das Receipt-Se
 | L4 | Uhr → Handy | `DiagnosticsChannel`: Wear Request/Response per `MessageClient`, Apple `replyHandler`; **Diag-Pfad in beiden Listener-Diensten vor dem Guard**; Peer-Auswahl aus `state.sync.peers`; Timeout; Tests mit Fake-Transport und gesperrtem Guard | L1 | M |
 | L5 | Backend | Migration, RPCs, Purge, Export (Fassung aus `20261028001000` fortschreiben), Admin-`<pre>`, Gateway-Body-Limit, pgTAP inkl. Nebenläufigkeitstest (zählt hart 39 RPCs) | – (parallel) | M |
 | L6 | Handy-UI | Haken, Vorschau, Versandablauf, Wiederholen, Hinweis „Uhr-App öffnen“ (Apple), Texte DE/EN, UI-Tests (desktopTest) | L4, L5 | M |
-| L7 | Datenschutz + Release | Datenschutzerklärung **Version 7** DE/EN (`site/app-datenschutz.html` §5, `site/en/app-privacy.html` §5) und Zustimmungskatalog. **Folge:** `has_current_consents` verlangt die neue Fassung, also bestätigen **alle Cloud-Nutzer beim nächsten Öffnen neu** (`20261018000200_consent_versions.sql:140-162`, [play-console](release/play-console.md)). Darum mit anderen Textänderungen für 0.5.0 bündeln (D6). Data safety (Play: „Diagnose“, optional, nicht geteilt); `plan-feedback-admin.md` anpassen. Reihenfolge: Migration auf Staging → App. **`site/` erst nach ausdrücklicher Freigabe** | L5, L6 | S |
+| L7 | Datenschutz + Release | Datenschutzerklärung, **neue Fassung** (nach PRIVACY 10 aus 0.7.0) (`site/app-datenschutz.html` §5, `site/en/app-privacy.html` §5) und Zustimmungskatalog. **Folge:** `has_current_consents` verlangt die neue Fassung, also bestätigen **alle Cloud-Nutzer beim nächsten Öffnen neu** (`20261018000200_consent_versions.sql:140-162`, [play-console](release/play-console.md)). Darum mit der Fassung des Ziel-Releases bündeln (D6). Data safety (Play: „Diagnose“, optional, nicht geteilt); `plan-feedback-admin.md` anpassen. Reihenfolge: Migration auf Staging → App. **`site/` erst nach ausdrücklicher Freigabe** | L5, L6 | S |
 | L8 | Messung | §7, nur Wear | L3 | S |
 
-Parallel möglich: L1 → (L2 ∥ L3 ∥ L4) und L5 ab sofort. Ziel-Release **0.5.0** (Handy + Wear). Apple-Teile laufen
+Parallel möglich: L1 → (L2 ∥ L3 ∥ L4) und L5 ab sofort. Ziel-Release: **offen** (siehe Status oben) (Handy + Wear). Apple-Teile laufen
 in CI mit. Für Realgeräte fehlt der Apple-Account. Die iOS-Support-Konfiguration (§4) kommt mit dem Apple-Release-Weg.
 
 ## 6. Abnahme
@@ -262,9 +264,9 @@ in CI mit. Für Realgeräte fehlt der Apple-Account. Die iOS-Support-Konfigurati
 | D1 | Aufzeichnung immer an, Schalter nur nach Messung? | ja (§7) |
 | D2 | Aufbewahrung der Logs | 30 Tage nach Abschluss, max. 90 Tage |
 | D3 | Haken bei „Fehler melden“ vorausgewählt? | nein (Opt-in, DSGVO) |
-| D4 | Ab wann? | 0.5.0, vor dem geschlossenen Pilot (12×14) – dort ist der Nutzen am größten |
+| D4 | Ab wann? | zurückgestellt (11.11.2026): mit dem nächsten Release, das ohnehin eine neue PRIVACY-Fassung braucht |
 | D5 | Apple Watch nicht erreichbar (App zu) | Hinweis „Advantly auf der Uhr öffnen“ + „Erneut versuchen“; die Uhr sendet nicht vorab im Hintergrund |
-| D6 | Neue Datenschutz-Fassung erzwingt erneute Zustimmung aller Cloud-Nutzer | in Kauf nehmen, aber mit anderen 0.5.0-Textänderungen bündeln |
+| D6 | Neue Datenschutz-Fassung erzwingt erneute Zustimmung aller Cloud-Nutzer | in Kauf nehmen, aber mit der Fassung des Ziel-Releases bündeln |
 
 ## 9. Abgleich iOS ↔ Android (Stand 0.4.2)
 
