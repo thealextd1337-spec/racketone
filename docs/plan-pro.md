@@ -24,7 +24,7 @@ sperren sich wieder.
 | Zählen | Alle 5 Sportarten und Presets, Handy und Uhr, Undo, Director, Übergabe, mehrere Matches parallel, Aufschlag-Erfassung, Satzende-Dialog |
 | Verlauf | Unbegrenzt, Filter nach Sport, Gegner/Partner, Person und Name, Gruppierung nach Woche/Monat, Löschen, Ergebnis-Korrektur |
 | Match-Detail | Ergebnis, Satzverlauf, Spielverlauf mit Highlights und Pulskurve, Game-Historie, Aufschlag-/Return-/Break-/Satzball-/Entscheidungspunkt-Kennzahlen je Match, Share-Card |
-| Lokale Bilanz (H2H) | „Gegen X“ und „Mit X“: Siege/Niederlagen/Unentschieden und die letzten 5 Ergebnisse (`headToHead`, `HeadToHeadScreen`) |
+| Lokale Bilanz (H2H) | „Gegen X“ und „Mit X“: Siege/Niederlagen/Unentschieden und die letzten 5 Ergebnisse (`headToHead`, `HeadToHeadScreen`); bei Freunden über ihr Konto zusammengeführt, aus der Freundesliste („Bilanz“) und dem Match-Detail (Entscheidung 11.11.2026: frei) |
 | Startseite | „Letzte 7 Tage“ (Matches, Siege, Spielzeit), „Gesamtstatistik“ (Matches, gewonnene Games, höchster Puls, meiste Schritte in einem Satz) |
 | Gesundheit | Puls/Schritte live, Pulsverlauf aufzeichnen, Pulskurve je Match, Export/Import der Pulsverläufe (JSON) |
 | Konto/Cloud | Konto, Cloud-Sicherung, Freunde, Feed, geteilte Matches, Live, Zuschauer, Push, Gast mit Freund verknüpfen |

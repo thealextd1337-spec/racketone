@@ -276,7 +276,7 @@ Die Bestätigung schützt die Head-to-Head-Bilanz vor einseitigen Einträgen und
 | H8 | **Matchende / Statistik** | Ergebnis-Hero, Kacheln (Dauer, Ø/Max-Puls, kcal, Schritte), Momentum, Satzverlauf, Punkte-Statistik, Head-to-Head, Herzfrequenz-Kurve | Teilen, Bestätigung anfordern, Notiz/Foto hinzufügen (später), jede Grafik → Tabellenansicht |
 | H9 | **Verlauf** | Liste nach Monaten, Filter-Chips (Sport, Gegner, Belag), Siegquote je Filter | Tap → H8; Wischen → löschen (mit Undo) |
 | H10 | **Freunde – Feed** | Inbox oben (Bestätigungen), darunter Match-Karten der Freunde (Ergebnis, Sport, Dauer, Reaktionen) | Bestätigen/Ablehnen inline; Reagieren (Like/„Starkes Match“); Tap → Detail |
-| H11 | **Freunde – Liste/Anfragen** | Suche, Freunde mit H2H-Kurzbilanz, Einladen per Link/QR, offene Anfragen | Annehmen/Ablehnen; Tap → Freund-Profil |
+| H11 | **Freunde – Liste/Anfragen** | Suche, Freunde mit H2H-Kurzbilanz, Einladen per Link/QR, offene Anfragen | Annehmen/Ablehnen; Tap → Freund-Profil. *Stand 11.11.2026: je Freund „Bilanz“ (S/N/U mit und gegen, letzte 5); Kurzbilanz in der Zeile und Freund-Profil noch offen* |
 | H12 | **Freund-Profil** | Avatar, Sportarten, gemeinsame Matches, H2H je Sport/Belag | „Revanche starten“ (füllt Wizard vor) |
 | H13 | **Profil & Einstellungen** | Eigene Stats, Uhren & Geräte, Live-Einstellungen (Haptik, Töne, Sperre, Outdoor-Kontrast, Seitenzuordnung), Sprache, Health, Konto, Datenschutz, später Abo | Standard-Settings-Muster |
 | H14 | **Onboarding / Pre-Permissions / Paywall** | siehe Kapitel 7 | |
