@@ -14,6 +14,7 @@ import eu.advantly.ui.phone.setupFor
 import eu.advantly.ui.phone.testModel
 import java.util.Locale
 import kotlin.test.Test
+import kotlin.test.assertNotEquals
 
 /** Bilanz mit Freunden: dieselbe Person unter zwei Gast-IDs, verknüpft mit einem Konto, ergibt eine Bilanz. */
 @OptIn(ExperimentalTestApi::class)
@@ -41,11 +42,13 @@ class FriendRecordUiTest {
                 setContent { AdvantlyApp(model = model, darkTheme = true) }
                 waitForIdle()
 
-                val opponent =
+                fun opponentOf(id: eu.advantly.core.model.MatchId) =
                     model.history.matches.value
-                        .first { it.matchId == second }
+                        .first { it.matchId == id }
                         .setup.lineup.b
                         .single()
+                val opponent = opponentOf(second)
+                assertNotEquals(opponentOf(first), opponent, "zwei verschiedene Gast-IDs")
                 onNodeWithTag("h2h_person_${opponent.value}").performScrollTo().performClick()
                 waitForIdle()
                 onNodeWithTag("h2h").assertExists()

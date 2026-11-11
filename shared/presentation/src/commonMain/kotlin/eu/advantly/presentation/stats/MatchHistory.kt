@@ -46,7 +46,10 @@ data class HistoryPerson(
     val profile: String? = null,
 )
 
-/** Aufgelöste Personen-IDs statt Platz-IDs; Platzhalter und eigene Aliase sind keine H2H-Personen. */
+/**
+ * Aufgelöste Personen-IDs statt Platz-IDs; Platzhalter und eigene Aliase sind keine H2H-Personen. Ausnahme: ein Platzhalter,
+ * hinter dem laut Server ein fremdes Konto steht (im Match eines anderen nachträglich besetzt) – er zählt für dieses Konto.
+ */
 fun historyPeople(
     setup: MatchSetup,
     selfIds: Set<PlayerId>,
@@ -54,9 +57,11 @@ fun historyPeople(
     Side.entries.flatMap { side ->
         setup.lineup.players(side).mapNotNull { slot ->
             val player = setup.assignedPlayers[slot] ?: setup.player(slot) ?: return@mapNotNull null
-            if (player.isPlaceholder || player.id in selfIds || slot in selfIds || slot in setup.ownSlots) return@mapNotNull null
+            val profile = setup.linkedProfiles[player.id] ?: setup.linkedProfiles[slot]
+            if (player.isPlaceholder && profile == null) return@mapNotNull null
+            if (player.id in selfIds || slot in selfIds || slot in setup.ownSlots) return@mapNotNull null
             val role = if (side == setup.ownSide) HistoryRole.PARTNER else HistoryRole.OPPONENT
-            HistoryPerson(player, role, setup.linkedProfiles[player.id] ?: setup.linkedProfiles[slot])
+            HistoryPerson(player, role, profile)
         }
     }
 

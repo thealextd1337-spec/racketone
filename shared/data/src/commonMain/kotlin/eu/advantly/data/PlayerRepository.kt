@@ -119,7 +119,10 @@ class PlayerRepository internal constructor(
             rawGet(id)
         }
 
-    /** Profil-ID des als Freund eingetragenen Spielers [id] für [account]; nur für den Teilnehmer-Upload. */
+    /**
+     * Profil-ID des als Freund eingetragenen Spielers [id] für [account]: für den Teilnehmer-Upload und, solange es keinen
+     * Pull-Snapshot gibt, für die Bilanz mit Freunden. Bleibt auf dem Handy (nie Uhr, Export, Telemetrie).
+     */
     fun friendProfile(
         account: String,
         id: PlayerId,

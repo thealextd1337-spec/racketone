@@ -607,7 +607,7 @@
     <string name="h2h_empty">No rated matches yet.</string>
     <string name="h2h_recent">Last results</string>
     <string name="h2h_local_note">Rated matches on this device. Abandoned matches are excluded.</string>
-    <string name="h2h_friend_note">Rated matches on this device, including your friend's matches and guests linked to them. Abandoned matches are excluded.</string>
+    <string name="h2h_friend_note">Rated matches on this device in which this person played, including their own matches and guests linked to them. Abandoned matches are excluded.</string>
     <string name="format_win_by">Win by %1$d</string>
 
     <!-- Hilfe nur im Handy-Assistenten; keine Regelwirkung. -->
@@ -863,6 +863,7 @@
     <string name="friends_decline">Decline</string>
     <string name="friends_remove">Remove friend</string>
     <string name="friends_record">Record</string>
+    <string name="friends_record_description">Record with %1$s</string>
     <string name="friends_remove_explanation">Remove %1$s from your friends? Shared visibility between you ends.</string>
     <string name="friends_withdraw">Withdraw request</string>
     <string name="friends_withdraw_explanation">Withdraw your friend request to %1$s?</string>

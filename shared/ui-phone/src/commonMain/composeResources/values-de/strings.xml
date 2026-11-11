@@ -607,7 +607,7 @@
     <string name="h2h_empty">Noch keine gewerteten Matches.</string>
     <string name="h2h_recent">Letzte Ergebnisse</string>
     <string name="h2h_local_note">Gewertete Matches auf diesem Gerät. Abbrüche zählen nicht.</string>
-    <string name="h2h_friend_note">Gewertete Matches auf diesem Gerät, auch Matches deines Freundes und Gäste, die mit ihm verknüpft sind. Abbrüche zählen nicht.</string>
+    <string name="h2h_friend_note">Gewertete Matches auf diesem Gerät, in denen diese Person gespielt hat, auch ihre eigenen Matches und mit ihr verknüpfte Gäste. Abbrüche zählen nicht.</string>
     <string name="format_win_by">%1$d Punkte Vorsprung</string>
 
     <!-- Hilfe nur im Handy-Assistenten; keine Regelwirkung. -->
@@ -863,6 +863,7 @@
     <string name="friends_decline">Ablehnen</string>
     <string name="friends_remove">Freund entfernen</string>
     <string name="friends_record">Bilanz</string>
+    <string name="friends_record_description">Bilanz mit %1$s</string>
     <string name="friends_remove_explanation">%1$s aus deinen Freunden entfernen? Die gegenseitige Sichtbarkeit endet.</string>
     <string name="friends_withdraw">Anfrage zurückziehen</string>
     <string name="friends_withdraw_explanation">Deine Freundschaftsanfrage an %1$s zurückziehen?</string>

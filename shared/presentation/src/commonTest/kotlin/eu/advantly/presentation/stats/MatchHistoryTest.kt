@@ -82,6 +82,19 @@ class MatchHistoryTest {
     }
 
     @Test
+    fun placeholderCountsForTheAccountTheServerLinkedToIt() {
+        val opponent = setup.lineup.b.first()
+        val base = match(ResultReason.COMPLETED)
+        val placeholder =
+            base.setup.copy(players = base.setup.players.map { if (it.id == opponent) Player(opponent, "", isPlaceholder = true) else it })
+        val unlinked = base.copy(setup = placeholder)
+        val linked = base.copy(setup = placeholder.copy(linkedProfiles = mapOf(opponent to "anna")))
+        // Ohne Konto bleibt ein Platzhalter keine Person; mit Konto (im Match eines anderen besetzt) zählt er für Anna.
+        assertTrue(historyPeople(unlinked.setup, selfIds).none { it.player.id == opponent })
+        assertEquals(1, headToHead(listOf(linked), "anna", HistoryRole.OPPONENT, selfIds).total)
+    }
+
+    @Test
     fun filterCombinesSportNamePersonAndRole() {
         val padel = match(ResultReason.COMPLETED)
         val tennis = padel.copy(setup = padel.setup.copy(format = Presets.TENNIS_ONE_SET.format()))

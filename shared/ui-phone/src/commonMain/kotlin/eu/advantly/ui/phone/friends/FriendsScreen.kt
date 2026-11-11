@@ -32,6 +32,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.backhandler.BackHandler
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
@@ -94,6 +95,7 @@ import eu.advantly.ui.phone.resources.friends_outgoing_title
 import eu.advantly.ui.phone.resources.friends_query_hint
 import eu.advantly.ui.phone.resources.friends_query_label
 import eu.advantly.ui.phone.resources.friends_record
+import eu.advantly.ui.phone.resources.friends_record_description
 import eu.advantly.ui.phone.resources.friends_remove
 import eu.advantly.ui.phone.resources.friends_remove_explanation
 import eu.advantly.ui.phone.resources.friends_requests_empty
@@ -276,7 +278,18 @@ fun FriendsScreen(
                 state.friends.forEach { friend ->
                     Person(friend) {
                         onOpenRecord?.let { open ->
-                            TextButton({ open(friend.profileId) }, modifier = Modifier.testTag("friends_record_${friend.profileId}")) {
+                            val description =
+                                stringResource(
+                                    Res.string.friends_record_description,
+                                    friend.alias?.takeIf { it.isNotBlank() } ?: stringResource(Res.string.friends_unknown),
+                                )
+                            TextButton(
+                                { open(friend.profileId) },
+                                modifier =
+                                    Modifier
+                                        .testTag("friends_record_${friend.profileId}")
+                                        .semantics { contentDescription = description },
+                            ) {
                                 Text(stringResource(Res.string.friends_record))
                             }
                         }

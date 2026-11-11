@@ -37,6 +37,7 @@ import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.platform.formatDateTime
 import eu.advantly.ui.phone.resources.Res
 import eu.advantly.ui.phone.resources.action_back
+import eu.advantly.ui.phone.resources.friends_unknown
 import eu.advantly.ui.phone.resources.h2h_against
 import eu.advantly.ui.phone.resources.h2h_empty
 import eu.advantly.ui.phone.resources.h2h_friend_note
@@ -57,23 +58,18 @@ internal fun HeadToHeadLinks(
     onOpen: (HistoryPerson) -> Unit,
 ) {
     val selfIds = LocalSelfAliases.current + listOfNotNull(LocalSelfId.current)
+    val aliases = LocalFriendAliases.current
     historyPeople(setup, selfIds).forEach { person ->
+        // Mit bekanntem Konto die Bilanz über das Konto (in jedem Match dieselbe), sonst je Person.
+        val alias = person.profile?.let { aliases[it] }
+        val name = alias ?: person.player.displayName
+        if (name.isBlank()) return@forEach
+        val label = if (person.role == HistoryRole.OPPONENT) Res.string.h2h_against else Res.string.h2h_with
         TextButton(
             onClick = { onOpen(person) },
             modifier = Modifier.fillMaxWidth().testTag("h2h_person_${person.player.id.value}"),
         ) {
-            Text(
-                stringResource(
-                    if (person.role ==
-                        HistoryRole.OPPONENT
-                    ) {
-                        Res.string.h2h_against
-                    } else {
-                        Res.string.h2h_with
-                    },
-                    person.player.displayName,
-                ),
-            )
+            Text(stringResource(label, name))
         }
     }
 }
@@ -101,7 +97,7 @@ internal fun HeadToHeadScreen(
                 ?.displayName
                 .orEmpty()
                 .ifBlank { fallbackName }
-        }
+        }.ifBlank { stringResource(Res.string.friends_unknown) }
     Column(Modifier.fillMaxSize().safeContentPadding().testTag("h2h")) {
         TopBar(stringResource(Res.string.h2h_title), onBack, stringResource(Res.string.action_back))
         Column(
@@ -109,16 +105,9 @@ internal fun HeadToHeadScreen(
             verticalArrangement = Arrangement.spacedBy(Spacing.s),
         ) {
             Text(name, style = AdvantlyTheme.typography.headline, color = AdvantlyTheme.colors.text)
+            val note = if (profile != null) Res.string.h2h_friend_note else Res.string.h2h_local_note
             Text(
-                stringResource(
-                    if (profile !=
-                        null
-                    ) {
-                        Res.string.h2h_friend_note
-                    } else {
-                        Res.string.h2h_local_note
-                    },
-                ),
+                stringResource(note),
                 style = AdvantlyTheme.typography.caption,
                 color = AdvantlyTheme.colors.text2,
             )

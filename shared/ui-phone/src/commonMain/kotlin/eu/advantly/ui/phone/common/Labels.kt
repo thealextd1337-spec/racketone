@@ -66,8 +66,8 @@ val LocalSelfId = staticCompositionLocalOf<PlayerId?> { null }
 val LocalSelfAliases = staticCompositionLocalOf<Set<PlayerId>> { emptySet() }
 
 /**
- * Aliase der Freunde (Konto-ID → Alias), nur zur Anzeige: Ein eigener Gast heißt in einem Match so wie der Freund, mit dem
- * der Server genau diesen Platz verknüpft hat ([MatchSetup.linkedProfiles], plan-0.6.3 §3.5).
+ * Aliase der Freunde (Konto-ID → Alias), nur zur Anzeige: Eine Person heißt in einem Match so wie der Freund, dessen Konto
+ * dort hinter ihr steht ([MatchSetup.linkedProfiles]: zugeordneter Gast, eingetragener Freund oder Ersteller).
  */
 val LocalFriendAliases = staticCompositionLocalOf<Map<String, String>> { emptyMap() }
 

@@ -1042,7 +1042,12 @@ class SessionMatchStore(
     ): Map<PlayerId, String> {
         val profile = data.accountIdentities.profile ?: return emptyMap()
         data.cloudPulls.linkedParticipants(profile, matchId.value)?.let { linked -> return linked.mapKeys { PlayerId(it.key) } }
-        return (lineup.a + lineup.b).mapNotNull { id -> data.players.friendProfile(profile, id)?.let { id to it } }.toMap()
+        // Schlüssel wie in historyPeople: die aufgelöste Person, auch bei nachträglich zugewiesenem Platzhalter.
+        val assigned = data.assignments(matchId)
+        return (lineup.a + lineup.b)
+            .map { slot -> assigned[slot]?.id ?: slot }
+            .mapNotNull { id -> data.players.friendProfile(profile, id)?.let { id to it } }
+            .toMap()
     }
 
     private fun playersOf(
