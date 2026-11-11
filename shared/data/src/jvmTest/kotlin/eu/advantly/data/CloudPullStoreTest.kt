@@ -470,7 +470,7 @@ class CloudPullStoreTest {
      * steht oder die er abgelehnt hat; dort bleibt der Platz unverknüpft. Gelöschte Profile zählen nicht.
      */
     @Test
-    fun assignedParticipantsFollowTheServerLinkOfThisMatchOnly() {
+    fun linkedParticipantsFollowTheServerLinkOfThisMatchOnly() {
         createInMemoryJvmDriver().use { driver ->
             val data = LocalData(driver).selectPullAccount()
             val run = data.cloudPulls.beginRun("alice") {}.runSerial
@@ -501,6 +501,13 @@ class CloudPullStoreTest {
                         // Von Anja abgelehnt (match_link_rejections): ebenfalls unverknüpft.
                         match("rejected", part("s1", "test1", null, null)),
                         match("deleted", part("s1", "test1", "anja", "assigned", deleted = true)),
+                        // Match eines Freundes: Ersteller (self) und eingetragener Freund ohne Spieler-ID → Platz-ID.
+                        match(
+                            "friends",
+                            part("anja1", null, "anja", "self"),
+                            part("me", null, "alice", "linked"),
+                            part("s3", null, "carl", "linked"),
+                        ),
                     ),
                     emptyList(),
                     emptyList(),
@@ -509,11 +516,15 @@ class CloudPullStoreTest {
                     1,
                 ),
             ) {}
-            assertEquals(mapOf("test1" to "anja"), data.cloudPulls.assignedParticipants("alice", "linked"))
-            assertEquals(emptyMap(), data.cloudPulls.assignedParticipants("alice", "skipped"))
-            assertEquals(emptyMap(), data.cloudPulls.assignedParticipants("alice", "rejected"))
-            assertEquals(emptyMap(), data.cloudPulls.assignedParticipants("alice", "deleted"))
-            assertEquals(emptyMap(), data.cloudPulls.assignedParticipants("bob", "linked"))
+            assertEquals(mapOf("test1" to "anja"), data.cloudPulls.linkedParticipants("alice", "linked"))
+            // Test1 bleibt unverknüpft; Anja steht mit ihrem eigenen Platz drin.
+            assertEquals(mapOf("s2" to "anja"), data.cloudPulls.linkedParticipants("alice", "skipped"))
+            assertEquals(emptyMap(), data.cloudPulls.linkedParticipants("alice", "rejected"))
+            assertEquals(emptyMap(), data.cloudPulls.linkedParticipants("alice", "deleted"))
+            // Das eigene Konto ist keine fremde Person.
+            assertEquals(mapOf("anja1" to "anja", "s3" to "carl"), data.cloudPulls.linkedParticipants("alice", "friends"))
+            assertNull(data.cloudPulls.linkedParticipants("alice", "unknown"))
+            assertNull(data.cloudPulls.linkedParticipants("bob", "linked"))
         }
     }
 

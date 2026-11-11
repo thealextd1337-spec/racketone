@@ -39,9 +39,11 @@ val MatchSummary.gamesWon: Int
             sets.count { it.winner == setup.ownSide }
         }
 
+/** [profile]: fremdes Konto hinter der Person in diesem Match ([MatchSetup.linkedProfiles]), sonst `null`. */
 data class HistoryPerson(
     val player: Player,
     val role: HistoryRole,
+    val profile: String? = null,
 )
 
 /** Aufgelöste Personen-IDs statt Platz-IDs; Platzhalter und eigene Aliase sind keine H2H-Personen. */
@@ -53,15 +55,18 @@ fun historyPeople(
         setup.lineup.players(side).mapNotNull { slot ->
             val player = setup.assignedPlayers[slot] ?: setup.player(slot) ?: return@mapNotNull null
             if (player.isPlaceholder || player.id in selfIds || slot in selfIds || slot in setup.ownSlots) return@mapNotNull null
-            HistoryPerson(player, if (side == setup.ownSide) HistoryRole.PARTNER else HistoryRole.OPPONENT)
+            val role = if (side == setup.ownSide) HistoryRole.PARTNER else HistoryRole.OPPONENT
+            HistoryPerson(player, role, setup.linkedProfiles[player.id] ?: setup.linkedProfiles[slot])
         }
     }
 
+/** [profile]: eine Person über ihr Konto, egal unter welcher Spieler-ID sie im jeweiligen Match steht (Bilanz mit Freunden). */
 data class HistoryFilter(
     val sport: Sport? = null,
     val person: PlayerId? = null,
     val role: HistoryRole? = null,
     val query: String = "",
+    val profile: String? = null,
 )
 
 /** Filter und Sortierung verwenden nur Zusammenfassungen, niemals das Event-Log. */
@@ -75,9 +80,11 @@ fun filterHistory(
             val people = historyPeople(match.setup, selfIds)
             val matchesSport = filter.sport == null || match.setup.sport == filter.sport
             val matchesPerson =
-                (filter.person == null && filter.role == null) ||
+                (filter.person == null && filter.role == null && filter.profile == null) ||
                     people.any {
-                        (filter.person == null || it.player.id == filter.person) && (filter.role == null || it.role == filter.role)
+                        (filter.person == null || it.player.id == filter.person) &&
+                            (filter.profile == null || it.profile == filter.profile) &&
+                            (filter.role == null || it.role == filter.role)
                     }
             val matchesName =
                 filter.query.isBlank() ||
@@ -103,8 +110,22 @@ fun headToHead(
     person: PlayerId,
     role: HistoryRole,
     selfIds: Set<PlayerId>,
+): HeadToHead = headToHead(matches, HistoryFilter(person = person, role = role), selfIds)
+
+/** Bilanz mit einem Freund über sein Konto: alle Spieler-IDs, unter denen er in den lokalen Matches steht. */
+fun headToHead(
+    matches: List<MatchSummary>,
+    profile: String,
+    role: HistoryRole,
+    selfIds: Set<PlayerId>,
+): HeadToHead = headToHead(matches, HistoryFilter(profile = profile, role = role), selfIds)
+
+private fun headToHead(
+    matches: List<MatchSummary>,
+    filter: HistoryFilter,
+    selfIds: Set<PlayerId>,
 ): HeadToHead {
-    val rated = filterHistory(matches, HistoryFilter(person = person, role = role), selfIds).filter { it.isRated }
+    val rated = filterHistory(matches, filter, selfIds).filter { it.isRated }
     return HeadToHead(
         wins = rated.count { it.outcome() == HistoryOutcome.WIN },
         losses = rated.count { it.outcome() == HistoryOutcome.LOSS },
