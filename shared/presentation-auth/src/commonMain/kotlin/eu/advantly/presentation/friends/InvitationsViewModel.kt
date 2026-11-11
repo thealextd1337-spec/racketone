@@ -76,8 +76,10 @@ data class InvitationsState(
     /** Freundes-Link zum Teilen; die UI öffnet das Teilen-Menü und meldet [InvitationsViewModel.shareHandled]. */
     val share: OwnInvite? = null,
     val inviteBusy: Boolean = false,
-    /** Fehler beim Erzeugen eines Freundes-Links bzw. QR-Codes. */
+    /** Fehler beim Erzeugen oder Zurückziehen eines Freundes-Links bzw. QR-Codes. */
     val inviteError: String? = null,
+    /** Offene, noch gültige Freundes-Links und QR-Codes; `null` = noch nicht geladen. */
+    val friendLinks: Int? = null,
     /** Offene Claim-Links je Gast; `null` = noch nicht geladen. */
     val guestInvites: Map<String, GuestInvite>? = null,
     val guestShare: GuestInviteShare? = null,
@@ -112,6 +114,7 @@ class InvitationsViewModel(
     private var redeemJob: Job? = null
     private var inviteJob: Job? = null
     private var guestJob: Job? = null
+    private var countJob: Job? = null
     private var knownFriends: Set<String>? = null
 
     private class Stale : Exception()
@@ -191,6 +194,7 @@ class InvitationsViewModel(
 
     fun closeQr() {
         show { copy(qrOpen = false, qr = null) }
+        loadFriendLinks()
     }
 
     /** „Link teilen“: Freundes-Link mit 14 Tagen Gültigkeit. */
@@ -201,13 +205,69 @@ class InvitationsViewModel(
     fun dismissInviteError() = show { copy(inviteError = null) }
 
     /**
+     * Zahl der offenen Freundes-Links für „Alle zurückziehen“. Still: sperrt weder „Link teilen“ noch den QR-Code und
+     * zeigt keinen Fehler; offline bleibt der Zähler einfach stehen.
+     */
+    fun loadFriendLinks() {
+        val session = shown ?: return
+        if (mutable.value.access != FriendsAccess.READY || countJob?.isActive == true) return
+        countJob =
+            scope.launch {
+                try {
+                    auth.requireAccountSession(session)
+                    val open = port.openInvites(session.profileId).friendLinks()
+                    current(session)
+                    show { copy(friendLinks = open.size) }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // Zähler ist nur ein Hinweis; Fehler zeigt erst eine Aktion des Nutzers.
+                }
+            }
+    }
+
+    /**
+     * „Alle zurückziehen“ (Bestätigung liegt in der UI): entwertet alle offenen Freundes-Links und QR-Codes, auch
+     * weitergeleitete. Gast-Links bleiben. Löst auch die Grenze von 50 offenen Einladungen.
+     */
+    fun revokeFriendLinks() {
+        inviteJob =
+            work({ it.inviteBusy }, { copy(inviteBusy = it) }, { copy(inviteError = it) }) { session ->
+                val open = port.openInvites(session.profileId).friendLinks()
+                var done = 0
+                try {
+                    open.forEach { invite ->
+                        try {
+                            port.revokeInvite(session.profileId, invite.id)
+                        } catch (e: CloudException) {
+                            if (e.reason != "invite_not_found") throw e
+                        }
+                        done++
+                    }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    // Jeder Widerruf zählt aufs Budget `invitation` (20/min): bei vielen Links bricht es ab. Der Zähler
+                    // zeigt dann den echten Rest, ein erneuter Tipp später zieht ihn zurück.
+                    current(session)
+                    show { copy(friendLinks = open.size - done) }
+                    throw e
+                }
+                current(session)
+                show { copy(friendLinks = 0, qr = null) }
+            } ?: inviteJob
+    }
+
+    /**
      * Freundesliste nach jedem Abgleich: kommt bei offenem QR ein Freund hinzu, hat jemand den Code eingelöst (einmal
      * nutzbar, E5) – dann gleich einen neuen zeigen. Kein Erneuern im Takt.
      */
     fun onFriends(profileIds: Set<String>) {
         val before = knownFriends
         knownFriends = profileIds
-        if (before != null && mutable.value.qrOpen && (profileIds - before).isNotEmpty()) newQr()
+        if (before == null || (profileIds - before).isEmpty()) return
+        // Jemand hat einen Link oder Code eingelöst: Zähler neu, offener QR wird ersetzt.
+        loadFriendLinks()
+        if (mutable.value.qrOpen) newQr()
     }
 
     /** Offene Claim-Links für die Gästeliste. */
@@ -260,16 +320,24 @@ class InvitationsViewModel(
         val minutes = if (qr) QR_TTL_MINUTES else MAX_INVITE_TTL_MINUTES
         inviteJob =
             work({ it.inviteBusy }, { copy(inviteBusy = it) }, { copy(inviteError = it) }) { session ->
-                val token = port.createInvite(session.profileId, InviteKind.FRIEND, null, minutes)
+                val token =
+                    try {
+                        port.createInvite(session.profileId, InviteKind.FRIEND, null, minutes)
+                    } catch (e: CloudException) {
+                        // Grenze erreicht: Zähler holen, damit „Alle zurückziehen“ sicher erscheint.
+                        if (e.reason == "too_many_open_invites") loadFriendLinks()
+                        throw e
+                    }
                 current(session)
                 val invite = OwnInvite(InviteLinks.link(token), now() + minutes * MINUTE)
                 show {
+                    val counted = copy(friendLinks = friendLinks?.plus(1))
                     if (!qr) {
-                        copy(share = invite)
+                        counted.copy(share = invite)
                     } else if (qrOpen) {
-                        copy(qr = invite)
+                        counted.copy(qr = invite)
                     } else {
-                        this
+                        counted
                     }
                 }
             } ?: inviteJob
@@ -325,6 +393,7 @@ class InvitationsViewModel(
             nextLink()
             inviteJob?.cancel()
             guestJob?.cancel()
+            countJob?.cancel()
             knownFriends = null
             // received zählt weiter: die UI merkt sich den zuletzt behandelten Stand über Sitzungswechsel hinweg.
             mutable.value = InvitationsState(access = access, pending = token() != null, received = mutable.value.received)
@@ -407,6 +476,11 @@ class InvitationsViewModel(
                 if (started == epoch) show { setBusy(false) }
             }
         }
+    }
+
+    private fun List<OpenInvite>.friendLinks(): List<OpenInvite> {
+        val time = now()
+        return filter { it.kind == InviteKind.FRIEND && it.expiresAtMillis > time }
     }
 
     private fun List<OpenInvite>.claims(): Map<String, GuestInvite> {

@@ -206,6 +206,24 @@ class WatchControllerTest {
         assertTrue(live.takeOverOffered)
         val seconds = (live.sync as SyncUi.Stale).seconds
         assertTrue("Stand vor X s: $seconds", seconds != null && seconds >= 30)
+        // F15: genau eine Vibration beim Erscheinen, auch bei weiterem Ausfall kein Wiederholen
+        h.settle(60_000)
+        assertEquals(1, h.haptics.count { it.pattern == WatchHaptic.TAKE_OVER_OFFERED })
+    }
+
+    @Test
+    fun takeOverVibrationIsDeliveredWhenTheAppReturns() {
+        h.phone.create(Presets.TENNIS_SINGLES_BO3.format(), singles)
+        h.settle()
+        val sink = c.effects
+        c.effects = null // Activity gestoppt
+        h.offline("phone")
+        h.settle(31_000)
+        assertTrue(live.takeOverOffered)
+        assertEquals(0, h.haptics.count { it.pattern == WatchHaptic.TAKE_OVER_OFFERED })
+        c.effects = sink
+        c.tick()
+        assertEquals(1, h.haptics.count { it.pattern == WatchHaptic.TAKE_OVER_OFFERED })
     }
 
     @Test

@@ -1053,6 +1053,10 @@
     <string name="invite_title">Freunde einladen</string>
     <string name="invite_share_link">Link teilen</string>
     <string name="invite_show_qr">QR-Code zeigen</string>
+    <string name="invite_open_links">Offene Einladungslinks: %1$d</string>
+    <string name="invite_revoke_all">Alle zurückziehen</string>
+    <string name="invite_revoke_all_title">Alle Einladungslinks zurückziehen?</string>
+    <string name="invite_revoke_all_text">Links und QR-Codes, die du verschickt hast, funktionieren danach nicht mehr, auch weitergeleitete. Gast-Links bleiben.</string>
     <string name="invite_share_text">Lass uns auf Advantly befreundet sein: %1$s</string>
     <string name="invite_qr_hint">Lass diesen Code mit der Kamera scannen. Einmal nutzbar.</string>
     <string name="invite_qr_remaining">Noch %1$s</string>
@@ -1079,7 +1083,7 @@
     <string name="invite_error_own">Das ist deine eigene Einladung.</string>
     <string name="invite_error_claimed">%1$s wurde schon übernommen.</string>
     <string name="invite_error_claimed_neutral">Dieser Gast wurde schon übernommen.</string>
-    <string name="invite_error_too_many">Du hast zu viele offene Einladungen. Warte, bis ältere ablaufen.</string>
+    <string name="invite_error_too_many">Du hast zu viele offene Einladungen. Zieh deine Freundes-Links zurück oder warte, bis ältere ablaufen.</string>
     <string name="invite_retry">Erneut versuchen</string>
     <string name="guest_invite_send">Einladungslink senden</string>
     <string name="guest_invite_confirm_text">Wer den Link öffnet, übernimmt alle Matches von %1$s und wird dein Freund. Schick ihn nur an die Person, die %1$s ist.</string>

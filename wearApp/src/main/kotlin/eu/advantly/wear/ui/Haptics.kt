@@ -92,6 +92,11 @@ class Haptics(
             WatchHaptic.CONFIRM -> {
                 listOf(PRIMITIVE_TICK to 0) to longArrayOf(0, 20)
             }
+
+            // zwei dumpfe Impulse: Aufmerksamkeit ohne Punkt-Ähnlichkeit
+            WatchHaptic.TAKE_OVER_OFFERED -> {
+                listOf(PRIMITIVE_THUD to 0, PRIMITIVE_THUD to GAP_MS) to longArrayOf(0, 80, GAP_MS.toLong(), 80)
+            }
         }
 
     private companion object {
