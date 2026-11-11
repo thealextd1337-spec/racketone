@@ -111,6 +111,7 @@ internal class WatchControllerCore(
     private var seenMatch: MatchId? = null
     private var seenScorer: Boolean? = null
     private var seenRejected = 0
+    private var seenTakeOverOffer = false
 
     /** Zuletzt gemeldeter Hinweis „Eingaben in einem nicht mehr offenen Match verworfen“ (nach Übernahme durchs Handy). */
     private var seenDropped: DroppedInputs? = null
@@ -684,7 +685,12 @@ internal class WatchControllerCore(
 
     private fun publish() {
         updateServerChoice()
-        mutableState.value = WatchUiState(screen())
+        val next = WatchUiState(screen())
+        // PLAN F15: einmal vibrieren, wenn das Übernahme-Angebot erscheint; solange es steht, nicht wiederholen.
+        val offered = next.live?.takeOverOffered == true
+        if (offered && !seenTakeOverOffer) emit(WatchEffect.Haptic(WatchHaptic.TAKE_OVER_OFFERED))
+        seenTakeOverOffer = offered
+        mutableState.value = next
     }
 
     /** Lokale Präsentation, keine Match-Events; Dismiss übersteht Refresh und Ambient. */

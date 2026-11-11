@@ -206,6 +206,9 @@ class WatchControllerTest {
         assertTrue(live.takeOverOffered)
         val seconds = (live.sync as SyncUi.Stale).seconds
         assertTrue("Stand vor X s: $seconds", seconds != null && seconds >= 30)
+        // F15: genau eine Vibration beim Erscheinen, auch bei weiterem Ausfall kein Wiederholen
+        h.settle(60_000)
+        assertEquals(1, h.haptics.count { it.pattern == WatchHaptic.TAKE_OVER_OFFERED })
     }
 
     @Test

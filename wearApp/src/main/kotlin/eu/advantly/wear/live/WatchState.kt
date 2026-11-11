@@ -111,6 +111,9 @@ enum class WatchHaptic {
 
     /** Kurze Bestätigung einer Auswahl (Aufschlag-Info, Aufschläger). */
     CONFIRM,
+
+    /** „Zählen übernehmen“ ist erschienen (PLAN F15): einmal, kein Wiederholen. */
+    TAKE_OVER_OFFERED,
 }
 
 /** Kurzmeldungen (Mittelband, 3 s). */
