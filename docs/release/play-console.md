@@ -350,8 +350,9 @@ optional?“ → **Nein**). Optional bleiben nur Support-Meldungen und die per H
 | Technische Angaben (App-Version, OS, Gerätemodell, Bildschirm, Schriftgröße) | nur per Häkchen in Support-Meldungen | App-Info und -Leistung → Sonstige Leistungsdaten | ja | App-Funktionalität |
 | Abgleich Handy ↔ Uhr, Puls und Schritte | Data Layer, Ende-zu-Ende-verschlüsselt [P9]; nicht in die Cloud | – | – | **nicht erhoben** |
 
-**Stand 11.11.2026:** in der Console geprüft, 9 Datentypen wie in der Tabelle oben plus Gesundheitsdaten (ab 0.5.0). Am selben Tag
-„Kontakte“ ergänzt (erhoben, nicht geteilt, nicht sitzungsspezifisch, optional, App-Funktionen) und zur Prüfung eingereicht.
+**Stand 11.11.2026:** in der Console geprüft (9 Datentypen). Am selben Tag „Kontakte“ ergänzt (erhoben, nicht geteilt, nicht
+sitzungsspezifisch, optional, App-Funktionen) und zur Prüfung eingereicht; jetzt **10 Datentypen** wie in der Tabelle oben
+plus Gesundheitsdaten (ab 0.5.0).
 - [x] „Erhebt oder teilt deine App einen der erforderlichen Nutzerdatentypen?“ → **Ja**; Typen und Zwecke wie in der Tabelle, jeweils **erhoben, nicht geteilt**, **nicht ephemer**.
 - [x] „Werden alle Nutzerdaten bei der Übertragung verschlüsselt?“ → **Ja** (TLS).
 - [x] „Können Nutzer das Löschen ihrer Daten anfordern?“ → **Ja**: in der App (Profil → Konto & Datenschutz → Kontolöschung beantragen) und per Web-Link
@@ -360,14 +361,16 @@ optional?“ → **Nein**). Optional bleiben nur Support-Meldungen und die per H
 - Android-Datensicherung (Phone `allowBackup=true`) ist eine Systemfunktion im Google-Konto des Nutzers und keine Übertragung an uns. In der Datenschutzerklärung (§7) ist sie erwähnt. Seit 0.5.0 ist die App-Datenbank (Matches, Pulsverläufe) auf Handy und Uhr davon ausgenommen.
 - Absturzdaten (Android vitals) erhebt Google über das System bzw. Play mit Zustimmung des Nutzers, nicht unser App-Code. Es ist kein SDK eingebunden.
 - **0.2.0 (Freunde, geteilte Matches, Google-Login):** Datentypen bleiben gleich (Alias, Benutzername, Freundescode und
-  Freundesliste fallen unter Name/Nutzer-IDs; geteilte Matches unter Fitness-Infos). Die Sichtbarkeit für andere Nutzer der App
+  Freundesliste fallen unter Name/Nutzer-IDs; geteilte Matches unter Fitness-Infos). **Seit 11.11.2026** steht die
+  Freundesliste zusätzlich unter „Kontakte“ (siehe Tabelle). Die Sichtbarkeit für andere Nutzer der App
   ist **kein „Teilen“** im Sinne von Play (keine Weitergabe an Drittunternehmen). Kontoerstellung zusätzlich **„OAuth“** ankreuzen
   (Google-Login), weiterhin „Nutzername und andere Authentifizierung“ (E-Mail-Code). Die Einstellung „Puls & Schritte“ ist eine
   Präferenz, keine Gesundheitsinfo; Puls- und Schrittwerte bleiben **nicht erhoben**.
 - **Neu ausfüllen, sobald** Push, Live-Zuschauer oder Health-Daten in der Cloud dazukommen.
 - **0.7.0 (Einladungslinks, QR, Gast übernehmen):** keine neue Datenart. Einladungen (Hash, Art, Ablauf, Einlöser) fallen
   unter Nutzer-IDs/Freundesliste, Gastnamen unter Name. Kein In-App-Scanner (kein ML Kit), keine Kamera-Berechtigung: QR wird
-  mit der System-Kamera gescannt. Formular bleibt unverändert.
+  mit der System-Kamera gescannt. Formular blieb zunächst unverändert; **seit 11.11.2026** stehen Freundesliste und
+  Einladungsgraph unter „Kontakte“ (siehe Tabelle).
   In P3 kommen Puls und kcal dazu, sobald sie in die Cloud **synchronisiert** werden („Gesundheitsinfo/Fitness-Info“, Zweck App-Funktionalität, nicht geteilt).
   **Rein lokales Speichern** von Puls oder kcal auf Uhr bzw. Handy ist **keine** Erhebung.
   Ob das Schreiben nach Health Connect auf demselben Gerät eine Angabe auslöst, vor P3 prüfen. Unabhängig davon ist Health Connect eigens zu deklarieren (§6.7).
