@@ -1,17 +1,15 @@
 // Dockerfreier Ersatz für `supabase db reset && supabase test db` auf Windows-Entwicklungsrechnern.
 // Postgres 17 (embedded-postgres) + minimaler Supabase-Nachbau (supabase-stub.sql). Nur Vorprüfung, maßgeblich ist CI.
 //
-// Aufruf (Repo-Root):  node tools/pgtap-local/run.mjs [filter1,filter2]
+// Aufruf (Repo-Root, Git Bash):  node tools/pgtap-local/run.mjs [filter1,filter2]   (Filter auf den Dateinamen)
 // Umgebung:
-//   PORT=56170        Port des Servers. Windows reserviert u. a. 54522–55121 (netsh … show excludedportrange).
-//   DATADIR=data      Datenordner relativ zu diesem Skript (parallele Läufe: eigener PORT + DATADIR).
-//   RACES=1 | 181,510 Renntests wie im CI-Schritt nach pgTAP (alle oder per Präfix).
+//   ADVANTLY_PGTAP_PORT=56170    Port. Windows reserviert u. a. 54522–55121 (netsh … show excludedportrange).
+//   ADVANTLY_PGTAP_DATADIR=data  Datenordner relativ zu diesem Skript (parallele Läufe: eigener Port + Ordner).
+//   RACES=1 | 181,510            Renntests wie in CI nach pgTAP (alle oder per Präfix), braucht `uv`.
 //   ADVANTLY_EXPORT_TEST_DENO=<deno.exe>  für 200 --archive-roundtrip.
-//   VERBOSE, NOTICES, PGLOG  mehr Ausgabe.
-// Nie eine eigene Variable mit PG-Präfix setzen: Die Renntests lehnen jede PG*-Umgebung ab.
-// Lokal erwartbar rot: 110 (pg_cron) und 200_private_data_exports_platform (Storage/pg_cron/pg_net).
-import EmbeddedPostgres from 'embedded-postgres';
-import pg from 'pg';
+//   VERBOSE, NOTICES, LOG_PG     mehr Ausgabe.
+// Keine Variable mit PG-Präfix setzen: Die Renntests lehnen jede PG*-Umgebung ab (der Runner bricht dann ab).
+// LOCAL_SKIP braucht Storage/pg_cron/pg_net und läuft nur in CI.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -20,12 +18,24 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const supaDir = path.resolve(here, '../../supabase');
 const filters = (process.argv[2] ?? '').split(',').filter(Boolean);
-const dataDir = path.join(here, process.env.DATADIR ?? 'data');
-const port = Number(process.env.PORT ?? 56170);
+const dataDir = path.join(here, process.env.ADVANTLY_PGTAP_DATADIR ?? 'data');
+const port = Number(process.env.ADVANTLY_PGTAP_PORT ?? 56170);
 const db = 'advantly_pgtap';
 const url = `postgresql://postgres:postgres@127.0.0.1:${port}/${db}`;
+const LOCAL_SKIP = ['110_onboarding_cleanup.test.sql', '200_private_data_exports_platform.test.sql'];
 
-// Wie ci.yml „Consent-Gate und D2/D3-Lockrennen prüfen“ und „Export-Rennen …“.
+const fail = (msg) => {
+  console.error(msg);
+  process.exit(2);
+};
+if (!Number.isInteger(port) || port < 1 || port > 65535) fail(`ADVANTLY_PGTAP_PORT ungültig: ${process.env.ADVANTLY_PGTAP_PORT}`);
+const pgEnv = Object.keys(process.env).filter((k) => k.toUpperCase().startsWith('PG'));
+if (pgEnv.length) fail(`PG*-Umgebungsvariablen entfernen (Renntests lehnen sie ab): ${pgEnv.join(', ')}`);
+if (!fs.existsSync(path.join(here, 'node_modules/embedded-postgres'))) fail('Abhängigkeiten fehlen: cd tools/pgtap-local && npm ci');
+const { default: EmbeddedPostgres } = await import('embedded-postgres');
+const { default: pg } = await import('pg');
+
+// Wie ci.yml „290 mit verfälschter Planner-Statistik“, „Consent-Gate und D2/D3-Lockrennen prüfen“ und „Export-Rennen …“.
 const RACES = [
   ['290_staged_account_deletion_zero_stats.py', 'ADVANTLY_LIFECYCLE_TEST_DB_URL'],
   ['181_cloud_consent_gate_concurrency.py', 'ADVANTLY_CONSENT_TEST_DB_URL'],
@@ -44,7 +54,7 @@ const server = new EmbeddedPostgres({
   password: 'postgres',
   port,
   persistent: true,
-  onLog: (m) => process.env.PGLOG && console.log('PG', String(m).trim()),
+  onLog: (m) => process.env.LOG_PG && console.log('PG', String(m).trim()),
   onError: (m) => console.log('PGERR', String(m).trim()),
 });
 const conn = (database) => {
@@ -65,7 +75,7 @@ const race = (file, key, ...extra) =>
     child.on('exit', (code) => resolve(code ?? 2));
   });
 
-// embedded-postgres bringt kein pgTAP mit: generierte pgTAP-1.3.3-Dateien (BSD-Lizenz) aus vendor/ einkopieren.
+// embedded-postgres bringt kein pgTAP mit: pgTAP-1.3.3-Dateien aus vendor/ einkopieren (Lizenz: vendor/LICENSE).
 const pkgs = path.join(here, 'node_modules/@embedded-postgres');
 for (const p of fs.readdirSync(pkgs)) {
   const ext = path.join(pkgs, p, 'native/share/extension');
@@ -73,9 +83,11 @@ for (const p of fs.readdirSync(pkgs)) {
 }
 
 let exitCode = 0;
-if (!fs.existsSync(path.join(dataDir, 'PG_VERSION'))) await server.initialise();
-await server.start();
+let started = false;
 try {
+  if (!fs.existsSync(path.join(dataDir, 'PG_VERSION'))) await server.initialise();
+  await server.start();
+  started = true;
   const admin = conn('postgres');
   await admin.connect();
   await admin.query(`drop database if exists ${db} with (force)`);
@@ -111,9 +123,17 @@ try {
   walk(testDir);
   files.sort();
   let failed = 0;
+  let selected = 0;
   for (const f of files) {
+    const name = path.basename(f);
     // 000-Setup legt die Test-Helfer an und läuft immer mit.
-    if (filters.length && !filters.some((x) => f.includes(x)) && !path.basename(f).startsWith('000')) continue;
+    const setup = name.startsWith('000');
+    if (filters.length && !setup && !filters.some((x) => name.includes(x))) continue;
+    if (!setup) selected++;
+    if (LOCAL_SKIP.includes(name)) {
+      console.log(`SKIP ${path.relative(testDir, f)} (nur in CI lauffähig)`);
+      continue;
+    }
     const t = conn(db);
     await t.connect();
     const lines = [];
@@ -133,14 +153,16 @@ try {
       err = e;
     }
     await t.end().catch(() => {});
-    const ok = !err && !lines.some((l) => /^not ok|^# Looks like|^# Failed/.test(l));
+    const plan = lines.find((l) => /^1\.\.\d+/.test(l));
+    const ok = !err && plan && !lines.some((l) => /^not ok|^# Looks like|^# Failed/.test(l));
     if (!ok) failed++;
-    console.log(`${ok ? 'PASS' : 'FAIL'} ${path.relative(testDir, f)} (${lines.find((l) => /^1\.\.\d+/.test(l)) ?? 'no plan'})`);
+    console.log(`${ok ? 'PASS' : 'FAIL'} ${path.relative(testDir, f)} (${plan ?? 'kein Plan'})`);
     if (!ok || process.env.VERBOSE) {
       for (const l of lines) if (process.env.VERBOSE || /^not ok|^#/.test(l)) console.log('   ', l);
       if (err) console.log('    ERROR:', err.message, err.position ? '@' + err.position : '', err.where ?? '');
     }
   }
+  if (filters.length && !selected) throw new Error(`Filter ${filters.join(',')} trifft keine Testdatei`);
   console.log(failed ? `\n${failed} Testdatei(en) fehlgeschlagen` : '\nAlle pgTAP-Tests grün');
   exitCode = failed ? 1 : 0;
 
@@ -158,6 +180,6 @@ try {
   console.error(e.message);
   exitCode = 2;
 } finally {
-  await server.stop();
+  if (started) await server.stop();
 }
 process.exit(exitCode);

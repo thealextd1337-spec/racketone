@@ -59,12 +59,12 @@ echtes Postgres 17 mit einem minimalen Supabase-Nachbau (Rollen `anon`/`authenti
 `realtime.messages/send/topic`), nur zur Vorprüfung. Maßgeblich ist der CI-Job.
 
 ```
-cd tools/pgtap-local && npm ci && cd ../..
-node tools/pgtap-local/run.mjs                 # alle pgTAP-Dateien (Filter: run.mjs 181,510)
-RACES=1 node tools/pgtap-local/run.mjs 000     # zusätzlich die Renntests aus dem CI-Schritt
+cd tools/pgtap-local && npm ci && cd ../..      # Git Bash, Node ≥ 18
+node tools/pgtap-local/run.mjs                 # alle pgTAP-Dateien (Filter auf Dateinamen: run.mjs 181,510)
+RACES=1 node tools/pgtap-local/run.mjs 000     # zusätzlich die Renntests aus CI (braucht `uv`)
 ```
-Port, Datenordner und Fallstricke stehen im Kopf von `run.mjs`. Lokal erwartbar rot: 110 (pg_cron) und
-`200_private_data_exports_platform` (Storage, pg_cron, pg_net).
+Port, Datenordner und Fallstricke stehen im Kopf von `run.mjs`. 110 und `200_private_data_exports_platform`
+brauchen Storage, pg_cron und pg_net und werden lokal als SKIP übersprungen.
 
 ## Wire-Fixtures neu erzeugen
 
