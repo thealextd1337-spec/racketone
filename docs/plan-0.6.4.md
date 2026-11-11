@@ -1,7 +1,7 @@
 # Plan 0.6.5: Gastname bleibt bei Kontolöschung des verknüpften Freundes
 
 > Status: **umgesetzt, gebündelt in 0.7.0 (Build 18), 2026-11-09** (D1 = Ja, D2 = mit Einladungen bündeln; Migration
-> `20261109000200_gastnamen_erhalten.sql`, pgTAP 470/520, `admin_redact_guest_name` nur Rolle `admin` mit AAL2) ·
+> `20261109000200_gastnamen_erhalten.sql`, pgTAP 470/520, `admin_redact_guest_name` nur Rolle `admin` mit AAL2, vom Nutzer bestätigt am 2026-11-11) ·
 > Entwurf 2026-11-04, überarbeitet nach Review (Fable, Astra) · Bezug: 0.6.3 (PR #97, Gast mit Freund
 > verknüpfen, pgTAP 470) · Version **0.6.5**, Build ≥ 18 (nächster freier nach 0.6.4) · **Umsetzung erst nach den
 > Nutzerentscheidungen in §6**
@@ -57,7 +57,7 @@ oder Claim, auch per Einladungslink):
 **Umsetzung:**
 - Migration mit Seam-Ersatz in Phase A/B, `purge_account`, `capture_profile_redactions`, `redact_linked_names`. Beide
   Löschwege ergeben denselben Endzustand (Kommentar in `20261022000200`).
-- Neu `public.admin_redact_guest_name(p_player_id, p_reason)` (Support-Rolle, Audit-Zeile): redigiert einen einzelnen
+- Neu `public.admin_redact_guest_name(p_player_id, p_reason)` (nur Rolle `admin` mit AAL2, Audit-Zeile): redigiert einen einzelnen
   Gast über den vorhandenen Redaktionspfad (Epoche, Manifest, Payloads).
 - Späteres erneutes Verknüpfen mit einem anderen Freund ist erlaubt, weil der Gast nicht redigiert ist.
 
@@ -79,7 +79,7 @@ oder Claim, auch per Einladungslink):
   - Anjas eigener, unzugeordneter Gast → „Gelöschter Spieler“.
   - Anjas eigener Gast, einem Dritten zugeordnet bzw. von ihm beansprucht → gehört danach dem Dritten, Name bleibt.
   - Gleicher Endzustand für Job-Pfad und `purge_account` (wie Test 290).
-  - `admin_redact_guest_name`: nur Support-Rolle, Audit-Zeile, Ergebnis wie Redaktion.
+  - `admin_redact_guest_name`: nur Rolle `admin` mit AAL2, Audit-Zeile, Ergebnis wie Redaktion.
 - **Client:** Pull nach der Löschung: Gast unverknüpft, Name „Test1“, Aktion verfügbar; eigene Matches zeigen „Test1“.
 
 ## 5. Release
