@@ -390,6 +390,38 @@ class InvitationsViewModelTest {
             assertEquals("rate_limit_exceeded", state.guestError)
         }
 
+    @Test fun friendLinksAreCountedAndRevokedAllAtOnceButGuestLinksStay() =
+        fixture(ready("alex")) {
+            port.open =
+                listOf(
+                    OpenInvite("f1", InviteKind.FRIEND, null, 5_000_000),
+                    OpenInvite("f2", InviteKind.FRIEND, null, 1_100_000),
+                    OpenInvite("old", InviteKind.FRIEND, null, 999_999),
+                    OpenInvite("g1", InviteKind.CLAIM_PLAYER, "test1", 2_000_000),
+                )
+            model.loadFriendLinks()
+            assertEquals(2, state.friendLinks)
+            model.shareLink()
+            assertEquals(3, state.friendLinks)
+            // Grenze erreicht: „Alle zurückziehen“ löst sie; ein inzwischen benutzter Link gilt als erledigt.
+            port.failure = "too_many_open_invites"
+            model.shareLink()
+            assertEquals("too_many_open_invites", state.inviteError)
+            port.failure = null
+            port.revokeFailure = "invite_not_found"
+            port.calls.clear()
+            model.revokeFriendLinks()
+            assertEquals(listOf("alex:open", "alex:revoke:f1", "alex:revoke:f2"), port.calls)
+            assertEquals(0, state.friendLinks)
+            assertNull(state.inviteError)
+            // Andere Fehler bleiben sichtbar, der Zähler bleibt.
+            port.revokeFailure = "rate_limit_exceeded"
+            model.loadFriendLinks()
+            model.revokeFriendLinks()
+            assertEquals("rate_limit_exceeded", state.inviteError)
+            assertEquals(2, state.friendLinks)
+        }
+
     @Test fun accountSwitchDropsOwnLinksAndLateAnswers() =
         fixture(ready("alex")) {
             model.openQr()

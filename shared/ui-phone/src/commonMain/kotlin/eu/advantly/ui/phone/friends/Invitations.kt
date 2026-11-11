@@ -24,6 +24,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -35,6 +36,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import eu.advantly.cloud.sync.InviteKind
 import eu.advantly.cloud.sync.InviteStatus
+import eu.advantly.presentation.friends.FriendsAccess
 import eu.advantly.presentation.friends.InvitationsState
 import eu.advantly.presentation.friends.InvitationsViewModel
 import eu.advantly.presentation.friends.InviteProblem
@@ -42,6 +44,7 @@ import eu.advantly.presentation.match.WallClock
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import eu.advantly.ui.phone.designsystem.Spacing
 import eu.advantly.ui.phone.resources.Res
+import eu.advantly.ui.phone.resources.action_cancel
 import eu.advantly.ui.phone.resources.friends_dismiss
 import eu.advantly.ui.phone.resources.friends_unknown
 import eu.advantly.ui.phone.resources.invite_accept
@@ -64,6 +67,7 @@ import eu.advantly.ui.phone.resources.invite_error_used
 import eu.advantly.ui.phone.resources.invite_friend_text
 import eu.advantly.ui.phone.resources.invite_friend_title
 import eu.advantly.ui.phone.resources.invite_needs_account
+import eu.advantly.ui.phone.resources.invite_open_links
 import eu.advantly.ui.phone.resources.invite_pending
 import eu.advantly.ui.phone.resources.invite_qr_description
 import eu.advantly.ui.phone.resources.invite_qr_expired
@@ -71,6 +75,9 @@ import eu.advantly.ui.phone.resources.invite_qr_hint
 import eu.advantly.ui.phone.resources.invite_qr_new
 import eu.advantly.ui.phone.resources.invite_qr_remaining
 import eu.advantly.ui.phone.resources.invite_retry
+import eu.advantly.ui.phone.resources.invite_revoke_all
+import eu.advantly.ui.phone.resources.invite_revoke_all_text
+import eu.advantly.ui.phone.resources.invite_revoke_all_title
 import eu.advantly.ui.phone.resources.invite_share_link
 import eu.advantly.ui.phone.resources.invite_share_text
 import eu.advantly.ui.phone.resources.invite_show_qr
@@ -98,6 +105,38 @@ internal fun InviteBlock(
             }
         }
         OutlinedButton(model::openQr, modifier = Modifier.testTag("invite_show_qr")) { Text(stringResource(Res.string.invite_show_qr)) }
+    }
+    LaunchedEffect(model, state.access) { if (state.access == FriendsAccess.READY) model.loadFriendLinks() }
+    var confirmRevoke by remember { mutableStateOf(false) }
+    val open = state.friendLinks ?: 0
+    if (open > 0) {
+        FlowRow(verticalArrangement = Arrangement.Center) {
+            Text(
+                stringResource(Res.string.invite_open_links, open),
+                color = AdvantlyTheme.colors.text2,
+                modifier = Modifier.align(Alignment.CenterVertically).testTag("invite_open_links"),
+            )
+            TextButton({ confirmRevoke = true }, enabled = !state.inviteBusy, modifier = Modifier.testTag("invite_revoke_all")) {
+                Text(stringResource(Res.string.invite_revoke_all))
+            }
+        }
+    }
+    if (confirmRevoke) {
+        AlertDialog(
+            onDismissRequest = { confirmRevoke = false },
+            title = { Text(stringResource(Res.string.invite_revoke_all_title)) },
+            text = { Text(stringResource(Res.string.invite_revoke_all_text)) },
+            confirmButton = {
+                TextButton(
+                    {
+                        confirmRevoke = false
+                        model.revokeFriendLinks()
+                    },
+                    modifier = Modifier.testTag("invite_revoke_all_confirm"),
+                ) { Text(stringResource(Res.string.invite_revoke_all)) }
+            },
+            dismissButton = { TextButton({ confirmRevoke = false }) { Text(stringResource(Res.string.action_cancel)) } },
+        )
     }
     if (!state.qrOpen) InviteError(state.inviteError, model::dismissInviteError)
     val share = state.share

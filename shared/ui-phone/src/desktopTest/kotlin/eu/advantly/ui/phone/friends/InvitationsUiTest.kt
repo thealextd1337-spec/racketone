@@ -207,7 +207,8 @@ class InvitationsUiTest {
                     click("invite_share_link")
                     waitForIdle()
                     assertEquals(listOf("Let's be friends on Advantly: https://advantly.eu/i/#$TOKEN"), shared)
-                    assertEquals(listOf("create:friend:20160"), port.calls)
+                    assertEquals(listOf("open", "create:friend:20160"), port.calls)
+                    onNodeWithTag("invite_open_links").assertTextEquals("Open invitation links: 1")
                     click("invite_show_qr")
                     waitForIdle()
                     onNodeWithTag("invite_qr_code").assertContentDescriptionEquals("QR code for your invitation")
@@ -216,7 +217,18 @@ class InvitationsUiTest {
                     assertEquals("create:friend:10", port.calls.last())
                     click("invite_qr_new")
                     waitForIdle()
-                    assertEquals(3, port.calls.size)
+                    assertEquals(3, port.calls.count { it.startsWith("create:") })
+                    invitations.closeQr()
+                    waitForIdle()
+                    onNodeWithTag("invite_open_links").assertTextEquals("Open invitation links: 3")
+                    port.open = listOf(OpenInvite("f1", InviteKind.FRIEND, null, NOW + 60_000))
+                    click("invite_revoke_all")
+                    waitForIdle()
+                    onNodeWithText("Revoke all invitation links?").assertExists()
+                    onNodeWithTag("invite_revoke_all_confirm").performClick()
+                    waitForIdle()
+                    assertEquals("revoke:f1", port.calls.last())
+                    onNodeWithTag("invite_open_links").assertDoesNotExist()
                 }
             }
         }
@@ -243,12 +255,14 @@ class InvitationsUiTest {
                     mainClock.advanceTimeBy(2_000)
                     onNodeWithTag("invite_qr_remaining").assertTextEquals("Abgelaufen")
                     onNodeWithText("Neuer Code").assertExists()
-                    assertEquals(2, port.calls.size, "kein Erneuern im Takt")
+                    assertEquals(2, port.calls.count { it.startsWith("create:") }, "kein Erneuern im Takt")
                     port.createFailure = "too_many_open_invites"
                     click("invite_qr_new")
                     waitForIdle()
                     onNodeWithTag("invite_error")
-                        .assertTextEquals("Du hast zu viele offene Einladungen. Warte, bis ältere ablaufen.")
+                        .assertTextEquals(
+                            "Du hast zu viele offene Einladungen. Zieh deine Freundes-Links zurück oder warte, bis ältere ablaufen.",
+                        )
                 }
             }
         }
