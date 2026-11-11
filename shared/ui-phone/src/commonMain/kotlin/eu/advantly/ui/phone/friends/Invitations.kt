@@ -106,8 +106,11 @@ internal fun InviteBlock(
         }
         OutlinedButton(model::openQr, modifier = Modifier.testTag("invite_show_qr")) { Text(stringResource(Res.string.invite_show_qr)) }
     }
-    LaunchedEffect(model, state.access) { if (state.access == FriendsAccess.READY) model.loadFriendLinks() }
-    var confirmRevoke by remember { mutableStateOf(false) }
+    // Auch nach Konto- oder Sitzungswechsel (READY bleibt READY, der Zähler fällt auf null) neu laden.
+    val unknown = state.friendLinks == null
+    LaunchedEffect(model, state.access, unknown) { if (state.access == FriendsAccess.READY && unknown) model.loadFriendLinks() }
+    // Ein offener Dialog darf nach einem Kontowechsel nicht die Links des neuen Kontos zurückziehen.
+    var confirmRevoke by remember(unknown) { mutableStateOf(false) }
     val open = state.friendLinks ?: 0
     if (open > 0) {
         FlowRow(verticalArrangement = Arrangement.Center) {

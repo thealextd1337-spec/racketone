@@ -686,10 +686,15 @@ internal class WatchControllerCore(
     private fun publish() {
         updateServerChoice()
         val next = WatchUiState(screen())
-        // PLAN F15: einmal vibrieren, wenn das Übernahme-Angebot erscheint; solange es steht, nicht wiederholen.
+        // PLAN F15: einmal je Ausfall vibrieren, wenn das Übernahme-Angebot erscheint. Ohne Empfänger (App im
+        // Hintergrund) nachholen, sobald die Activity wieder da ist.
         val offered = next.live?.takeOverOffered == true
-        if (offered && !seenTakeOverOffer) emit(WatchEffect.Haptic(WatchHaptic.TAKE_OVER_OFFERED))
-        seenTakeOverOffer = offered
+        if (!offered) {
+            seenTakeOverOffer = false
+        } else if (!seenTakeOverOffer && effects != null) {
+            emit(WatchEffect.Haptic(WatchHaptic.TAKE_OVER_OFFERED))
+            seenTakeOverOffer = true
+        }
         mutableState.value = next
     }
 

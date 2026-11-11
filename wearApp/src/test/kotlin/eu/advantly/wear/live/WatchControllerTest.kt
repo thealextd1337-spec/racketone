@@ -212,6 +212,21 @@ class WatchControllerTest {
     }
 
     @Test
+    fun takeOverVibrationIsDeliveredWhenTheAppReturns() {
+        h.phone.create(Presets.TENNIS_SINGLES_BO3.format(), singles)
+        h.settle()
+        val sink = c.effects
+        c.effects = null // Activity gestoppt
+        h.offline("phone")
+        h.settle(31_000)
+        assertTrue(live.takeOverOffered)
+        assertEquals(0, h.haptics.count { it.pattern == WatchHaptic.TAKE_OVER_OFFERED })
+        c.effects = sink
+        c.tick()
+        assertEquals(1, h.haptics.count { it.pattern == WatchHaptic.TAKE_OVER_OFFERED })
+    }
+
+    @Test
     fun takeOverNeedsConfirmationAndSwitchesRoles() {
         h.phone.create(Presets.TENNIS_SINGLES_BO3.format(), singles)
         h.settle()

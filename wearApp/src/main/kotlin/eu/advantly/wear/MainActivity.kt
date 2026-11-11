@@ -51,6 +51,7 @@ import eu.advantly.wear.glance.GlanceLaunch
 import eu.advantly.wear.live.ValueThrottle
 import eu.advantly.wear.live.WatchController
 import eu.advantly.wear.live.WatchEffect
+import eu.advantly.wear.live.WatchHaptic
 import eu.advantly.wear.live.WatchTelemetryPolicy
 import eu.advantly.wear.live.WatchToast
 import eu.advantly.wear.live.displayMillis
@@ -518,7 +519,8 @@ class MainActivity : ComponentActivity() {
         if (!currentSession()) return
         when (effect) {
             is WatchEffect.Haptic -> {
-                if (!isAmbient.value) haptics.play(effect.pattern, effect.attention)
+                // Das Übernahme-Angebot entsteht gerade bei ruhender Anzeige, also auch im Ambient-Modus spielen.
+                if (!isAmbient.value || effect.pattern == WatchHaptic.TAKE_OVER_OFFERED) haptics.play(effect.pattern, effect.attention)
             }
 
             is WatchEffect.Toast -> {

@@ -218,10 +218,11 @@ class InvitationsUiTest {
                     click("invite_qr_new")
                     waitForIdle()
                     assertEquals(3, port.calls.count { it.startsWith("create:") })
+                    // Beim Schließen des QR-Codes zählt der Server neu.
+                    port.open = listOf(OpenInvite("f1", InviteKind.FRIEND, null, NOW + 60_000))
                     invitations.closeQr()
                     waitForIdle()
-                    onNodeWithTag("invite_open_links").assertTextEquals("Open invitation links: 3")
-                    port.open = listOf(OpenInvite("f1", InviteKind.FRIEND, null, NOW + 60_000))
+                    onNodeWithTag("invite_open_links").assertTextEquals("Open invitation links: 1")
                     click("invite_revoke_all")
                     waitForIdle()
                     onNodeWithText("Revoke all invitation links?").assertExists()

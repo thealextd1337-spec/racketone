@@ -37,6 +37,9 @@ private class FakeInvites : InvitesPort {
     var redemption = InviteRedemption(InviteKind.FRIEND, "alex")
     var open = emptyList<OpenInvite>()
     var revokeFailure: String? = null
+
+    /** Rate-Limit `invitation`: so viele Widerrufe gehen noch durch, danach `rate_limit_exceeded`. */
+    var revokeBudget = Int.MAX_VALUE
     private var created = 0
 
     private fun call(name: String) {
@@ -78,6 +81,7 @@ private class FakeInvites : InvitesPort {
     ) {
         call("$profileId:revoke:$inviteId")
         revokeFailure?.let { throw CloudException(it, false) }
+        if (revokeBudget-- <= 0) throw CloudException("rate_limit_exceeded", false)
     }
 
     override suspend fun openInvites(profileId: String): List<OpenInvite> {
@@ -344,13 +348,14 @@ class InvitationsViewModelTest {
             model.newQr()
             assertEquals(2, port.calls.size)
             assertEquals(time + 10 * 60_000L, state.qr?.expiresAtMillis)
-            // Jemand hat den Code eingelöst (friend_accepted → Pull → neue Freundin): neuer Code.
+            // Jemand hat den Code eingelöst (friend_accepted → Pull → neue Freundin): neuer Code, Zähler neu geladen.
             model.onFriends(setOf("bob", "anja"))
-            assertEquals(3, port.calls.size)
+            assertEquals(3, port.calls.count { it.contains(":create:") })
+            assertTrue("alex:open" in port.calls)
             model.closeQr()
             assertNull(state.qr)
             model.onFriends(setOf("bob", "anja", "carl"))
-            assertEquals(3, port.calls.size)
+            assertEquals(3, port.calls.count { it.contains(":create:") })
             // Link teilen: 14 Tage.
             model.shareLink()
             assertEquals("alex:create:friend:null:20160", port.calls.last())
@@ -420,6 +425,33 @@ class InvitationsViewModelTest {
             model.revokeFriendLinks()
             assertEquals("rate_limit_exceeded", state.inviteError)
             assertEquals(2, state.friendLinks)
+            // Rate-Limit mitten im Widerruf (20/min): Zähler zeigt den echten Rest, erneuter Versuch zieht ihn zurück.
+            port.revokeFailure = null
+            port.revokeBudget = 1
+            model.revokeFriendLinks()
+            assertEquals("rate_limit_exceeded", state.inviteError)
+            assertEquals(1, state.friendLinks)
+            port.revokeBudget = Int.MAX_VALUE
+            port.open = listOf(OpenInvite("f2", InviteKind.FRIEND, null, 1_100_000))
+            model.revokeFriendLinks()
+            assertEquals(0, state.friendLinks)
+            assertNull(state.inviteError)
+        }
+
+    @Test fun countingFriendLinksIsSilentAndBlocksNothing() =
+        fixture(ready("alex")) {
+            port.failure = "connection_failed"
+            model.loadFriendLinks()
+            assertNull(state.inviteError)
+            assertNull(state.friendLinks)
+            assertFalse(state.inviteBusy)
+            port.failure = null
+            port.open = listOf(OpenInvite("f1", InviteKind.FRIEND, null, 5_000_000))
+            model.loadFriendLinks()
+            assertEquals(1, state.friendLinks)
+            // Kontowechsel: Zähler weg, bis die UI neu lädt.
+            auth.session.value = ready("bob")
+            assertNull(state.friendLinks)
         }
 
     @Test fun accountSwitchDropsOwnLinksAndLateAnswers() =
