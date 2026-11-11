@@ -244,7 +244,8 @@ class InvitationsViewModel(
                         }
                         done++
                     }
-                } catch (e: CloudException) {
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
                     // Jeder Widerruf zählt aufs Budget `invitation` (20/min): bei vielen Links bricht es ab. Der Zähler
                     // zeigt dann den echten Rest, ein erneuter Tipp später zieht ihn zurück.
                     current(session)
@@ -319,7 +320,14 @@ class InvitationsViewModel(
         val minutes = if (qr) QR_TTL_MINUTES else MAX_INVITE_TTL_MINUTES
         inviteJob =
             work({ it.inviteBusy }, { copy(inviteBusy = it) }, { copy(inviteError = it) }) { session ->
-                val token = port.createInvite(session.profileId, InviteKind.FRIEND, null, minutes)
+                val token =
+                    try {
+                        port.createInvite(session.profileId, InviteKind.FRIEND, null, minutes)
+                    } catch (e: CloudException) {
+                        // Grenze erreicht: Zähler holen, damit „Alle zurückziehen“ sicher erscheint.
+                        if (e.reason == "too_many_open_invites") loadFriendLinks()
+                        throw e
+                    }
                 current(session)
                 val invite = OwnInvite(InviteLinks.link(token), now() + minutes * MINUTE)
                 show {

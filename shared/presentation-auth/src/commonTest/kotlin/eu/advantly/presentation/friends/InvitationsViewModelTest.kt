@@ -410,8 +410,10 @@ class InvitationsViewModelTest {
             assertEquals(3, state.friendLinks)
             // Grenze erreicht: „Alle zurückziehen“ löst sie; ein inzwischen benutzter Link gilt als erledigt.
             port.failure = "too_many_open_invites"
+            port.calls.clear()
             model.shareLink()
             assertEquals("too_many_open_invites", state.inviteError)
+            assertEquals("alex:open", port.calls.last(), "Zähler wird bei erreichter Grenze geholt")
             port.failure = null
             port.revokeFailure = "invite_not_found"
             port.calls.clear()
