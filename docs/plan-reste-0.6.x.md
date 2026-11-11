@@ -16,6 +16,12 @@
 
 Empfehlung: R1–R3 und R5 sofort, R6 als kleiner PR, R4 nach Auftrag.
 
+> **Stand 2026-11-11: R1–R6 erledigt.** R1: Die Angaben in der Console (9 Datentypen) entsprechen §6.6 der Checkliste.
+> 0.7.0 bringt keine neuen Datenarten (QR nur als Anzeige, keine Kamera), also keine Änderung. R2: 51 ist kein Entwurf mehr,
+> sondern seit 29.10. im Alpha-Track veröffentlicht (ohne Tester). Ausstehende Änderungen gibt es keine, nichts verworfen.
+> R3: Sicherung in `H:/racketone-archiv/worktrees-20261111`. Behalten wurden `release-050` (Build-Worktree),
+> `w9/diagnose-log` und `w9/puls-cloud-geparkt`. R4: dieser PR. R5: `H:/racketone` steht auf `main`. R6: `tools/pgtap-local`.
+
 > **Stand 2026-11-09:** B1 = (b) umgesetzt – Gastname (0.6.5) und Einladungen gemeinsam in 0.7.0 mit PRIVACY 10.
 
 ## 2. Abstimmung zwischen den Plänen
