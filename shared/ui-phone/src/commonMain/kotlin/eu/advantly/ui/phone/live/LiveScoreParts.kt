@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
+import eu.advantly.core.scoring.SidePair
 import eu.advantly.presentation.live.LiveScoreRules
 import eu.advantly.presentation.live.ScoreHint
 import eu.advantly.presentation.live.SetColumn
@@ -197,10 +198,32 @@ internal fun SetTable(
     outdoor: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    SetTable(
+        columns = LiveScoreRules.setColumns(snapshot.state),
+        teamNames = SidePair(teamName(snapshot.setup, Side.A), teamName(snapshot.setup, Side.B)),
+        serving = snapshot.state.serve?.side,
+        sport = snapshot.setup.sport,
+        header = header,
+        elapsed = elapsed,
+        outdoor = outdoor,
+        modifier = modifier,
+    )
+}
+
+/** Gemeinsame Satztabelle für lokale Matches und die bereinigte Cloud-Anzeige. */
+@Composable
+internal fun SetTable(
+    columns: List<SetColumn>,
+    teamNames: SidePair<String>,
+    serving: Side?,
+    sport: Sport?,
+    header: String,
+    elapsed: @Composable () -> Unit,
+    outdoor: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
     val colors = AdvantlyTheme.colors
     val shape = Radii.cardShape
-    val columns = LiveScoreRules.setColumns(snapshot.state)
-    val serving = snapshot.state.serve?.side
     Column(
         modifier =
             modifier
@@ -224,7 +247,7 @@ internal fun SetTable(
             elapsed()
         }
         for (side in Side.entries) {
-            SetRow(side, teamName(snapshot.setup, side), columns, serving == side, snapshot.setup.sport, outdoor)
+            SetRow(side, teamNames[side], columns, serving == side, sport, outdoor)
         }
     }
 }
@@ -235,7 +258,7 @@ private fun SetRow(
     name: String,
     columns: List<SetColumn>,
     serving: Boolean,
-    sport: Sport,
+    sport: Sport?,
     outdoor: Boolean,
 ) {
     val colors = AdvantlyTheme.colors
@@ -249,7 +272,7 @@ private fun SetRow(
             Modifier
                 .size(8.dp)
                 .alpha(if (serving) 1f else 0f)
-                .background(sportColor(sport), CircleShape),
+                .background(sport?.let { sportColor(it) } ?: colors.brand, CircleShape),
         )
         Spacer(Modifier.width(7.dp))
         Text(

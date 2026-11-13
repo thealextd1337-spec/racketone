@@ -500,6 +500,67 @@ class PhoneSyncCoordinatorTest {
             }
         }
 
+    @Test fun networkRecoveryDuringAFailedCycleRetriesAfterTheCycleEnds() =
+        runBlocking {
+            val f = Fixture(this)
+            val hold = Hold()
+            try {
+                f.pullOffline = true
+                f.holdPush = hold
+                f.signIn()
+                withTimeout(15_000) { hold.entered.await() }
+                // Download schon fehlgeschlagen, Upload noch unterwegs: jetzt kommt das Netz zurück.
+                f.pullOffline = false
+                f.sync.onNetworkAvailable()
+                f.sync.onNetworkAvailable()
+                hold.release.complete(Unit)
+                val state = f.firstCycle()
+                assertEquals(PhoneSyncStatus.BACKED_UP, state.status)
+                assertEquals(2, f.count("start:cloud_sync_pull_v1"))
+                assertEquals(0, f.record.failures["alice"])
+                assertNull(state.nextAttemptAtMs)
+            } finally {
+                f.close()
+            }
+        }
+
+    @Test fun networkRecoveryDuringASuccessfulCycleDoesNotRepeatTheCycle() =
+        runBlocking {
+            val f = Fixture(this)
+            val hold = Hold()
+            try {
+                f.holdPush = hold
+                f.signIn()
+                withTimeout(15_000) { hold.entered.await() }
+                f.sync.onNetworkAvailable()
+                hold.release.complete(Unit)
+                assertEquals(PhoneSyncStatus.BACKED_UP, f.firstCycle().status)
+                assertEquals(1, f.count("start:cloud_sync_pull_v1"))
+            } finally {
+                f.close()
+            }
+        }
+
+    @Test fun oneNetworkRecoverySignalRetriesOnlyOnceIfTheConnectionStillFails() =
+        runBlocking {
+            val f = Fixture(this)
+            val hold = Hold()
+            try {
+                f.pullOffline = true
+                f.holdPush = hold
+                f.signIn()
+                withTimeout(15_000) { hold.entered.await() }
+                f.sync.onNetworkAvailable()
+                f.sync.onNetworkAvailable()
+                hold.release.complete(Unit)
+                assertEquals(PhoneSyncStatus.CONNECTION_FAILED, f.firstCycle().status)
+                assertEquals(2, f.count("start:cloud_sync_pull_v1"))
+                assertEquals(2, f.record.failures["alice"])
+            } finally {
+                f.close()
+            }
+        }
+
     @Test fun blockedNamesItsReasonAndNeverLoopsOrSchedules() =
         runBlocking {
             for (case in listOf("permission", "rejected")) {

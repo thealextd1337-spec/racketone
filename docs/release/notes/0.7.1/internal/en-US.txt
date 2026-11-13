@@ -1,0 +1,6 @@
+New in 0.7.1:
+• Friends' live matches: score, sets and names in the same view as while scoring, also in landscape.
+• If the network returns during a sync, the app retries right away.
+• Record with and against friends counts by account.
+• Revoke open friend links and QR codes at once; the watch vibrates on a take-over offer.
+Please test: score a match with a friend who follows it live on their phone (names, points, sets).

@@ -1,0 +1,6 @@
+Neu in 0.7.1:
+• Live-Matches von Freunden: Spielstand, Sätze und Namen in derselben Ansicht wie beim Zählen, auch quer.
+• Kommt das Netz während einer Synchronisierung zurück, lädt die App direkt nach.
+• Bilanz mit und gegen Freunde zählt über das Konto.
+• Offene Freundes-Links und QR-Codes gesammelt zurückziehen; die Uhr vibriert beim Übernahme-Angebot.
+Bitte testen: Match mit einem Freund zählen, Freund verfolgt live am Handy (Namen, Punkte, Sätze).

@@ -163,6 +163,8 @@
 
     <!-- Live-Score (H6) -->
     <string name="live_team_us">US</string>
+    <string name="live_team_a">TEAM A</string>
+    <string name="live_team_b">TEAM B</string>
     <string name="live_team_them">THEM</string>
     <string name="live_team_us_name">Us</string>
     <string name="live_team_them_name">Them</string>
@@ -716,6 +718,10 @@
     <string name="whats_new_18_1">Invite friends: in the Friends tab, share a link or show a QR code – whoever opens it and accepts is your friend right away.</string>
     <string name="whats_new_18_2">Guests take over their own matches: in your profile under players, choose “Send invitation link” – the person sees what it’s about before accepting.</string>
     <string name="whats_new_18_3">If a linked friend deletes their account, your guest keeps its name with you.</string>
+    <string name="whats_new_19_1">Friends’ live matches: score, sets and names now appear in the same view as while scoring, also in landscape.</string>
+    <string name="whats_new_19_2">If the network comes back during a sync, the app retries right away, so friends see your live score sooner.</string>
+    <string name="whats_new_19_3">Your record with and against friends now counts by account, also in your friends’ matches.</string>
+    <string name="whats_new_19_4">Revoke all open friend links and QR codes at once in the Friends tab.</string>
     <string name="device_repair">Re-pair watches</string>
     <string name="device_repair_hint">Use this if a watch was lost or replaced. Every watch then has to confirm pairing again on the watch itself; its data stays.</string>
     <string name="device_repair_confirm_title">Re-pair all watches?</string>

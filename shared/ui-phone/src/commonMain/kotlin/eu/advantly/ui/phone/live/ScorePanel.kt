@@ -324,7 +324,8 @@ internal fun ScorePanel(
                                 text = content.serveLabel,
                                 style = AdvantlyTheme.typography.caption,
                                 color = secondary,
-                                maxLines = 2,
+                                maxLines = 1,
+                                softWrap = false,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f, fill = false),
                             )
@@ -370,7 +371,7 @@ internal fun ScorePanel(
                             text = text,
                             modifier = Modifier.testTag(if (content.side == Side.A) "score_us" else "score_them"),
                             style = AdvantlyTheme.typography.scoreXl.copy(fontSize = fontSize, lineHeight = fontSize),
-                            color = Color.White,
+                            color = if (outdoor) Color.White else colors.text,
                             textAlign = TextAlign.Center,
                             maxLines = 1,
                         )
