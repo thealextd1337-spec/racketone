@@ -83,6 +83,7 @@ internal class PhoneSyncCoordinator(
     override val state = mutable.asStateFlow()
     private var context: PhoneCloudContext? = null
     private var cycle: Job? = null
+    private var networkRecoveryPending = false
     private var lastEndMs: Long? = null
     private var closed = false
 
@@ -109,6 +110,7 @@ internal class PhoneSyncCoordinator(
             context = next
             cycle?.cancel()
             cycle = null
+            networkRecoveryPending = false
             // Geplante Arbeit des alten Kontos endet sofort; ein Auftrag prüft beim Start zusätzlich sein Konto.
             if (previous != null) scheduler.cancel()
             mutable.value = PhoneSyncState(available = next != null, lastBackupAtMs = next?.let { record.lastBackupAtMs(it.profile) })
@@ -144,7 +146,12 @@ internal class PhoneSyncCoordinator(
     fun onNetworkAvailable() {
         confined()
         val expected = synchronize() ?: return
-        if (cycle == null && mutable.value.status == PhoneSyncStatus.CONNECTION_FAILED) launch(expected)
+        if (cycle != null) {
+            // Das Netz kann zurückkommen, während ein alter Request noch mit Verbindungsfehler endet.
+            networkRecoveryPending = true
+        } else if (mutable.value.status == PhoneSyncStatus.CONNECTION_FAILED) {
+            launch(expected)
+        }
     }
 
     /**
@@ -174,14 +181,18 @@ internal class PhoneSyncCoordinator(
         job =
             work.launch(start = CoroutineStart.LAZY) {
                 var again = false
+                var completed = false
                 try {
                     again = run(expected) && !followUp
+                    completed = true
                 } finally {
                     if (cycle === job) {
+                        val retryNetwork = completed && networkRecoveryPending && mutable.value.status == PhoneSyncStatus.CONNECTION_FAILED
+                        networkRecoveryPending = false
                         cycle = null
                         lastEndMs = nowMs()
                         mutable.value = mutable.value.copy(running = false)
-                        if (again && !closed) launch(expected, followUp = true) else onRunEnded()
+                        if ((again || retryNetwork) && !closed) launch(expected, followUp = true) else onRunEnded()
                     }
                 }
             }
