@@ -718,6 +718,10 @@
     <string name="whats_new_18_1">Freunde einladen: Im Freunde-Tab einen Link teilen oder einen QR-Code zeigen – wer ihn öffnet und annimmt, ist sofort dein Freund.</string>
     <string name="whats_new_18_2">Gäste übernehmen ihre Matches selbst: Im Profil unter Spieler „Einladungslink senden“ – die Person sieht vor dem Annehmen, worum es geht.</string>
     <string name="whats_new_18_3">Löscht ein verknüpfter Freund sein Konto, bleibt dein Gast mit seinem Namen bei dir erhalten.</string>
+    <string name="whats_new_19_1">Live-Matches von Freunden: Spielstand, Sätze und Namen erscheinen jetzt in derselben Ansicht wie beim Zählen, auch quer.</string>
+    <string name="whats_new_19_2">Kommt das Netz während einer Synchronisierung zurück, lädt die App direkt nach – Freunde sehen deinen Live-Stand schneller.</string>
+    <string name="whats_new_19_3">Deine Bilanz mit und gegen Freunde zählt jetzt über das Konto, auch in Matches deiner Freunde.</string>
+    <string name="whats_new_19_4">Offene Freundes-Links und QR-Codes im Freunde-Tab gesammelt zurückziehen.</string>
     <string name="device_repair">Uhren neu koppeln</string>
     <string name="device_repair_hint">Nutze das, wenn eine Uhr verloren ging oder ersetzt wurde. Jede Uhr muss die Kopplung danach auf der Uhr selbst neu bestätigen; ihre Daten bleiben.</string>
     <string name="device_repair_confirm_title">Alle Uhren neu koppeln?</string>
