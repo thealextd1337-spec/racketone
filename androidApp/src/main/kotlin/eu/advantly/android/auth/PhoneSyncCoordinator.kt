@@ -192,7 +192,8 @@ internal class PhoneSyncCoordinator(
                         cycle = null
                         lastEndMs = nowMs()
                         mutable.value = mutable.value.copy(running = false)
-                        if ((again || retryNetwork) && !closed) launch(expected, followUp = true) else onRunEnded()
+                        // Der Netz-Nachlauf ist ein normaler Lauf und darf selbst noch einen Folgelauf haben.
+                        if (closed || !(again || retryNetwork)) onRunEnded() else launch(expected, followUp = again)
                     }
                 }
             }

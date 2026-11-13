@@ -38,6 +38,9 @@ internal fun FollowScore(
     val watched = entry.score
     val match = watched.match
     val teamNames = SidePair(names(match, Side.A), names(match, Side.B))
+    // Tennis/Padel melden im Match-Tiebreak Games 0:0; dann zeigt die laufende Spalte wie beim Zähler die Punkte.
+    val tiebreakPoints = watched.tiebreak && (watched.games == null || watched.games == 0 to 0)
+    val pointPair = watched.points?.let { (a, b) -> a.toIntOrNull()?.let { x -> b.toIntOrNull()?.let { y -> x to y } } }
     val columns =
         match.sets.map { (a, b) ->
             SetColumn(
@@ -52,12 +55,8 @@ internal fun FollowScore(
             )
         } +
             listOfNotNull(
-                (
-                    watched.games ?: watched.points?.let { (a, b) ->
-                        a.toIntOrNull()?.let { x -> b.toIntOrNull()?.let { y -> x to y } }
-                    }
-                )?.let { (a, b) ->
-                    SetColumn(SidePair(a, b), null, null, isCurrent = true, isTiebreakSet = watched.games == null && watched.tiebreak)
+                (if (tiebreakPoints) pointPair else watched.games ?: pointPair)?.let { (a, b) ->
+                    SetColumn(SidePair(a, b), null, null, isCurrent = true, isTiebreakSet = tiebreakPoints)
                 },
             )
     val serveLabel = stringResource(Res.string.live_serve)

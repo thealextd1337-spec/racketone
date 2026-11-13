@@ -420,6 +420,15 @@ class LiveUiTest {
                     onNodeWithTag("current_us").assertTextEquals("[7]")
                     onNodeWithTag("set_table_header").assertTextEquals("TIEBREAK")
                     screenshot("live-detail-tiebreak-hell-en")
+                    // Match-Tiebreak bei Tennis/Padel: Games bleiben 0:0, die Spalte zeigt die Punkte.
+                    live.matches =
+                        listOf(
+                            running.copy(projection = json("""{"sets":[[6,4],[4,6]],"games":[0,0],"points":["7","5"],"tiebreak":true}""")),
+                        )
+                    model.loadLive()
+                    waitForIdle()
+                    onNodeWithTag("current_us").assertTextEquals("[7]")
+                    onNodeWithTag("current_them").assertTextEquals("[5]")
                 }
             }
         }
