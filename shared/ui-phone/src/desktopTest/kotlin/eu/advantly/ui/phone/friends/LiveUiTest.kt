@@ -10,9 +10,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toAwtImage
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTextEquals
@@ -59,6 +62,8 @@ import java.util.Locale
 import javax.imageio.ImageIO
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 private const val NOW = 1_793_617_217_000L // 2026-11-02T11:00:17Z
 
@@ -329,9 +334,17 @@ class LiveUiTest {
                         Dark { LiveFollowScreen(model, "m1", onBack = { back++ }, clock = clock) }
                     }
                     waitForIdle()
-                    // Je Team eine Einheit für Screenreader: Namen, Aufschlag, Sätze, Games, Punkte.
-                    onNodeWithTag("live_follow_team_a").assertTextEquals("Bob", "6", "3", "40")
-                    onNodeWithTag("live_follow_team_b").assertTextEquals("Alice", "Serve", "4", "2", "AD")
+                    // Dieselben Score-Flächen und dieselbe Satztabelle wie beim Zähler, ohne Zähl-Aktionen.
+                    onNodeWithTag("score_us", useUnmergedTree = true).assertTextEquals("40")
+                    onNodeWithTag("score_them", useUnmergedTree = true).assertTextEquals("AD")
+                    onNodeWithTag("set_name_us").assertTextEquals("Bob")
+                    onNodeWithTag("set_name_them").assertTextEquals("Alice")
+                    onNodeWithTag("current_us").assertTextEquals("3")
+                    onNodeWithTag("current_them").assertTextEquals("2")
+                    text("6", "set_0_us")
+                    text("4", "set_0_them")
+                    onNodeWithTag("panel_them_serve", useUnmergedTree = true).assertExists()
+                    assertReadOnlyTeamColors()
                     onNodeWithTag("live_age_m1").assertTextContains("Score from 12 s ago")
                     text("View only", "live_follow")
                     // Spielt mit: weder Zuschauen beenden noch irgendeine Zähl-Aktion.
@@ -343,7 +356,7 @@ class LiveUiTest {
                     model.loadLive()
                     waitForIdle()
                     onNodeWithTag("live_follow_gone").assertTextContains("no longer live", substring = true)
-                    onNodeWithTag("live_follow_team_b").assertTextContains("AD")
+                    onNodeWithTag("score_them", useUnmergedTree = true).assertTextEquals("AD")
                     click("live_follow_back")
                     assertEquals(1, back)
                 }
@@ -358,12 +371,76 @@ class LiveUiTest {
                     var back = 0
                     setContent { Dark { LiveFollowScreen(model, "m2", onBack = { back++ }, clock = clock) } }
                     waitForIdle()
+                    onNodeWithTag("score_us", useUnmergedTree = true).assertTextEquals("15")
+                    onNodeWithTag("score_them", useUnmergedTree = true).assertTextEquals("0")
+                    onNodeWithTag("panel_us_serve", useUnmergedTree = true).assertExists()
+                    onNodeWithTag("current_us").assertTextEquals("2")
+                    assertReadOnlyTeamColors()
                     onNodeWithTag("live_offline_m2").assertExists()
                     screenshot("live-detail-zuschauer-dunkel-de")
                     click("live_follow_stop")
                     waitForIdle()
                     assertEquals(listOf("revoke:m2:me"), visitors.calls)
                     assertEquals(1, back)
+                }
+            }
+        }
+
+    private fun ComposeUiTest.assertReadOnlyTeamColors() {
+        for (tag in listOf("panel_us", "panel_them")) {
+            val panel = onNodeWithTag(tag)
+            panel.assertHasNoClickAction()
+            val semantics = panel.fetchSemanticsNode().config
+            assertFalse(semantics.contains(SemanticsActions.OnLongClick))
+            assertFalse(semantics.contains(SemanticsActions.CustomActions))
+            val color = panel.captureToImage().toPixelMap()[20, 80]
+            if (tag == "panel_us") assertTrue(color.red > color.blue) else assertTrue(color.blue > color.red)
+        }
+    }
+
+    @Test fun followShowsTiebreakAndMissingScoresWithoutInventingZeroes() =
+        withLocale(Locale.ENGLISH) {
+            val live = UiLive(listOf(running.copy(projection = null)))
+            withModel(live) { model ->
+                runDesktopComposeUiTest(width = 400, height = 900) {
+                    setContent {
+                        AdvantlyTheme(darkTheme = false) {
+                            Box(Modifier.fillMaxSize().background(AdvantlyTheme.colors.bg)) {
+                                LiveFollowScreen(model, "m1", onBack = {}, clock = clock)
+                            }
+                        }
+                    }
+                    waitForIdle()
+                    onNodeWithTag("score_us", useUnmergedTree = true).assertTextEquals("—")
+                    onNodeWithTag("current_us").assertDoesNotExist()
+                    live.matches = listOf(running.copy(projection = json("""{"sets":[[6,4],[4,6]],"points":["7","6"],"tiebreak":true}""")))
+                    model.loadLive()
+                    waitForIdle()
+                    onNodeWithTag("score_us", useUnmergedTree = true).assertTextEquals("7")
+                    onNodeWithTag("current_us").assertTextEquals("[7]")
+                    onNodeWithTag("set_table_header").assertTextEquals("TIEBREAK")
+                    screenshot("live-detail-tiebreak-hell-en")
+                }
+            }
+        }
+
+    @Test fun followPanelsUseLandscapeLayoutAndSupportLargeText() =
+        withLocale(Locale.GERMAN) {
+            withModel(UiLive(listOf(spectated))) { model ->
+                runDesktopComposeUiTest(width = 900, height = 440) {
+                    setContent {
+                        CompositionLocalProvider(LocalDensity provides Density(1f, 2f)) {
+                            Dark { LiveFollowScreen(model, "m2", onBack = {}, clock = clock) }
+                        }
+                    }
+                    waitForIdle()
+                    onNodeWithTag("live_follow_panels").performScrollTo()
+                    val a = onNodeWithTag("panel_us").fetchSemanticsNode().boundsInRoot
+                    val b = onNodeWithTag("panel_them").fetchSemanticsNode().boundsInRoot
+                    assertEquals(a.top, b.top)
+                    assertTrue(a.right < b.left)
+                    onNodeWithTag("score_us", useUnmergedTree = true).assertTextEquals("15")
+                    screenshot("live-detail-zuschauer-quer-grosse-schrift-de")
                 }
             }
         }

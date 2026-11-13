@@ -1,12 +1,12 @@
 package eu.advantly.ui.phone.friends
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
@@ -29,9 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import eu.advantly.core.model.Side
 import eu.advantly.presentation.friends.FriendsAccess
@@ -55,7 +53,6 @@ import eu.advantly.ui.phone.resources.live_only_display
 import eu.advantly.ui.phone.resources.live_playing_empty
 import eu.advantly.ui.phone.resources.live_playing_title
 import eu.advantly.ui.phone.resources.live_scorer_offline
-import eu.advantly.ui.phone.resources.live_serve
 import eu.advantly.ui.phone.resources.live_watching_title
 import eu.advantly.ui.phone.resources.scorer_invitation
 import eu.advantly.ui.phone.resources.watching_empty
@@ -257,81 +254,43 @@ fun LiveFollowScreen(
     val shown = current ?: last
     val gone = current == null && state.live != null
     val colors = AdvantlyTheme.colors
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(Spacing.xl)
-            .testTag("live_follow"),
-        verticalArrangement = Arrangement.spacedBy(Spacing.m),
-    ) {
-        TextButton(onBack, modifier = Modifier.testTag("live_follow_back")) { Text(stringResource(Res.string.live_back)) }
-        if (shown == null) {
-            Text(
-                stringResource(if (gone) Res.string.live_gone else Res.string.watching_loading),
-                color = colors.text2,
-                modifier = Modifier.testTag("live_follow_gone"),
-            )
-            return@Column
-        }
-        val match = shown.score.match
-        Text(
-            headline(match),
-            style = AdvantlyTheme.typography.title,
-            color = colors.text,
-            modifier = Modifier.semantics { heading() },
-        )
-        Text(stringResource(Res.string.live_only_display), style = AdvantlyTheme.typography.caption, color = colors.text2)
-        AdvantlyCard {
-            TeamScore(shown, Side.A)
-            HorizontalDivider(Modifier.padding(vertical = Spacing.s))
-            TeamScore(shown, Side.B)
-        }
-        if (gone) Text(stringResource(Res.string.live_gone), color = colors.hint, modifier = Modifier.testTag("live_follow_gone"))
-        LiveStatus(shown, now)
-        if (current != null) ScorerActions(model, current, onScore)
-        if (shown.relation == LiveRelation.VISITOR) {
-            TextButton({
-                model.stopWatching(matchId)
-                onBack()
-            }, modifier = Modifier.testTag("live_follow_stop")) { Text(stringResource(Res.string.watching_stop)) }
-        }
-    }
-}
-
-/** Eine Zeile je Team: Namen (+ Aufschlag), Sätze klein, Games mittel, Punkte groß; für Screenreader eine Einheit. */
-@Composable
-private fun TeamScore(
-    entry: LiveEntry,
-    side: Side,
-) {
-    val match = entry.score.match
-    val colors = AdvantlyTheme.colors
-
-    fun <T> pick(pair: Pair<T, T>) = if (side == Side.A) pair.first else pair.second
-    Row(
-        Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}.testTag("live_follow_team_${side.name.lowercase()}"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(Spacing.m),
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(names(match, side), style = AdvantlyTheme.typography.body, color = colors.text)
-            if (entry.serving == side) {
-                Text(stringResource(Res.string.live_serve), style = AdvantlyTheme.typography.caption, color = colors.brand)
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val landscape = maxWidth > maxHeight
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(Spacing.xl)
+                .testTag("live_follow"),
+            verticalArrangement = Arrangement.spacedBy(Spacing.m),
+        ) {
+            TextButton(onBack, modifier = Modifier.testTag("live_follow_back")) { Text(stringResource(Res.string.live_back)) }
+            if (shown == null) {
+                Text(
+                    stringResource(if (gone) Res.string.live_gone else Res.string.watching_loading),
+                    color = colors.text2,
+                    modifier = Modifier.testTag("live_follow_gone"),
+                )
+                return@Column
             }
-        }
-        match.sets.forEach { set ->
-            Text("${pick(set)}", style = AdvantlyTheme.typography.scoreS, color = colors.text2)
-        }
-        entry.score.games?.let { Text("${pick(it)}", style = AdvantlyTheme.typography.scoreM, color = colors.text) }
-        entry.score.points?.let {
+            val match = shown.score.match
             Text(
-                pick(it),
-                style = AdvantlyTheme.typography.scoreXl.copy(fontSize = 56.sp, lineHeight = 60.sp),
+                headline(match),
+                style = AdvantlyTheme.typography.title,
                 color = colors.text,
-                textAlign = TextAlign.End,
-                modifier = Modifier.widthIn(min = 72.dp),
+                modifier = Modifier.semantics { heading() },
             )
+            Text(stringResource(Res.string.live_only_display), style = AdvantlyTheme.typography.caption, color = colors.text2)
+            FollowScore(shown, landscape)
+            if (gone) Text(stringResource(Res.string.live_gone), color = colors.hint, modifier = Modifier.testTag("live_follow_gone"))
+            LiveStatus(shown, now)
+            if (current != null) ScorerActions(model, current, onScore)
+            if (shown.relation == LiveRelation.VISITOR) {
+                TextButton({
+                    model.stopWatching(matchId)
+                    onBack()
+                }, modifier = Modifier.testTag("live_follow_stop")) { Text(stringResource(Res.string.watching_stop)) }
+            }
         }
     }
 }

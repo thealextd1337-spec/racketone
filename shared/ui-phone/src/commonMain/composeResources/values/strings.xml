@@ -163,6 +163,8 @@
 
     <!-- Live-Score (H6) -->
     <string name="live_team_us">US</string>
+    <string name="live_team_a">TEAM A</string>
+    <string name="live_team_b">TEAM B</string>
     <string name="live_team_them">THEM</string>
     <string name="live_team_us_name">Us</string>
     <string name="live_team_them_name">Them</string>
