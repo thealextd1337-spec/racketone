@@ -530,3 +530,9 @@ Pläne: [docs/plan-einladungen.md](../docs/plan-einladungen.md) §3.5 und [docs/
 |---|---|---|
 | `20261109000100_einladungen.sql` | `preview_invite(p_token)` (Budget `search`, nur lesend): `{status, kind, inviterId, inviterAlias, expiresAt}`, bei `claim_player` + `ok` zusätzlich `guestName`, `matchCount`; `status` `ok`/`already_friends`/`already_claimed`/`own`/`expired`/`used`/`revoked`, sonst nur `{status: invalid}`. `revoke_invite(p_invite_id)` (Budget `invitation`, nur Ersteller, nur offene Links, sonst `invite_not_found`). `create_invite`: ein offener Claim-Link je Gast (älterer wird widerrufen), höchstens 50 offene Einladungen je Konto (`too_many_open_invites`, Rennen über `lock_sync`). Aufräumjob `advantly-invites-cleanup-v1` (täglich, 30 Tage nach Nutzung, Widerruf bzw. Ablauf). `player_claimed` wird zugestellt, solange der Claim besteht; Nachricht `{v, kind, profileId, playerId}` | 510, `510_einladungen_concurrency.py`, 410, 181, 170 |
 | `20261109000200_gastnamen_erhalten.sql` | Kontolöschung: fremde, mit dem Konto verknüpfte Gäste (Zuordnung oder Claim) werden vor der Redaktion entkoppelt und behalten ihren Namen (Job Phase A und `purge_account`, gleicher Endzustand); direkte Plätze, Self und eigene freie Gäste bleiben „Gelöschter Spieler“, eigene zugeordnete Gäste gehen weiter an die Dritten über. `admin_redact_guest_name` (siehe K4/K5) | 470, 520, 080, 290, `510_einladungen_concurrency.py`; 220/240/250 prüfen die Redaktionsmechanik mit abgeschalteter Entkopplung |
+
+## 0.7.2: Match-Tiebreak im Feed und beim Zuschauen
+
+| Migration | Inhalt | Tests |
+|---|---|---|
+| `20261113000100_match_tiebreak_saetze.sql` | `sanitize_projection` gibt zusätzlich `matchTiebreakSets` aus (0-basierte Indizes in `sets`), aus `matchTiebreak: true` am Satz (Summary) oder der Indexliste im Live-Stand; nur gültige, eindeutige Indizes, aufsteigend. `sets` bleibt `[[a,b],…]`, ältere Clients ignorieren das Feld. Wirkt beim Lesen, kein Backfill | 530, 340 |

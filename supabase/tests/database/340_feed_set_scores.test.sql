@@ -17,7 +17,7 @@ insert into public.match_participants(match_id, slot_id, team, position, profile
   values ('34000000-0000-4000-8000-000000000001', 'bob', 'B', 1, tests.uid('bob'), 'linked', 'Bob', true);
 
 select is(private.sanitize_projection(current_setting('tests.summary')::jsonb),
-  '{"sets":[[6,4],[6,7],[10,8]],"winner":"A"}'::jsonb, 'Client-Format → nur [[a,b]] und Sieger, keine Zusatzfelder');
+  '{"sets":[[6,4],[6,7],[10,8]],"matchTiebreakSets":[2],"winner":"A"}'::jsonb, 'Client-Format → nur [[a,b]], Match-Tiebreak-Index und Sieger (seit 20261113000100)');
 select is(private.sanitize_projection('{"sets":[[6,4],[3,6]]}'::jsonb), '{"sets":[[6,4],[3,6]]}'::jsonb,
   'Altes Paarformat bleibt gültig');
 select is(private.sanitize_projection('{"sets":[{"a":6,"b":4},[7,5]]}'::jsonb), '{"sets":[[6,4],[7,5]]}'::jsonb,
@@ -37,7 +37,7 @@ select is(private.sanitize_projection('{"sets":[{"a":6,"b":4,"heartRate":150,"pr
 select tests.authenticate_as('carol');
 select is((select m -> 'summary' from jsonb_array_elements(public.cloud_sync_pull_v1(0, 200) -> 'matches') m
            where m ->> 'id' = '34000000-0000-4000-8000-000000000001'),
-  '{"sets":[[6,4],[6,7],[10,8]],"winner":"A"}'::jsonb, 'Feed liefert Satzstände bereinigt');
+  '{"sets":[[6,4],[6,7],[10,8]],"matchTiebreakSets":[2],"winner":"A"}'::jsonb, 'Feed liefert Satzstände bereinigt');
 select ok(public.cloud_sync_pull_v1(0, 200)::text !~ 'tiebreakA|eventCount|completedSets|lastEventAtMs',
   'Feed ohne Rohfelder des Clients');
 reset role;
@@ -49,7 +49,7 @@ select is((select m -> 'summary' from jsonb_array_elements(public.cloud_sync_pul
   current_setting('tests.summary')::jsonb, 'Mitglied sieht ScoreSummary unverändert');
 -- Visitor-/Mitgliedssicht: Ergebnis ebenfalls korrekt bereinigt.
 select is(public.cloud_get_visitor_match_v1('34000000-0000-4000-8000-000000000001') -> 'result',
-  '{"sets":[[6,4],[6,7],[10,8]],"winner":"A"}'::jsonb, 'Visitor-Ergebnis mit Satzständen');
+  '{"sets":[[6,4],[6,7],[10,8]],"matchTiebreakSets":[2],"winner":"A"}'::jsonb, 'Visitor-Ergebnis mit Satzständen');
 reset role;
 
 select is((select provolatile::text from pg_proc where oid = 'private.sanitize_projection(jsonb)'::regprocedure), 's',

@@ -429,6 +429,19 @@ class LiveUiTest {
                     waitForIdle()
                     onNodeWithTag("current_us").assertTextEquals("[7]")
                     onNodeWithTag("current_them").assertTextEquals("[5]")
+                    // Offenes Match: beendeter Champions-Tiebreak in den Sätzen, danach läuft ein weiterer Satz.
+                    live.matches =
+                        listOf(
+                            running.copy(
+                                projection = json("""{"sets":[[6,4],[10,8]],"matchTiebreakSets":[1],"games":[1,0],"points":["15","0"]}"""),
+                            ),
+                        )
+                    model.loadLive()
+                    waitForIdle()
+                    text("6", "set_0_us")
+                    text("[10]", "set_1_us")
+                    text("[8]", "set_1_them")
+                    onNodeWithTag("current_us").assertTextEquals("1")
                 }
             }
         }

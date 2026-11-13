@@ -36,7 +36,19 @@ class LiveStateMappingTest {
         )
         // Server-Whitelist (private.sanitize_projection): alles andere würde verworfen bzw. darf nie gesendet werden.
         val whitelist =
-            setOf("sets", "games", "points", "serving", "flags", "status", "winner", "tiebreak", "scorerConnected", "updatedAtMs")
+            setOf(
+                "sets",
+                "matchTiebreakSets",
+                "games",
+                "points",
+                "serving",
+                "flags",
+                "status",
+                "winner",
+                "tiebreak",
+                "scorerConnected",
+                "updatedAtMs",
+            )
         assertTrue(whitelist.containsAll(live.keys))
     }
 
@@ -56,6 +68,20 @@ class LiveStateMappingTest {
         assertEquals(JsonPrimitive(true), liveStateOf("in_progress", scoreJson(tiebreak))!!["tiebreak"])
         // Anzeige außerhalb des Server-Schemas (z. B. Sonderzeichen) wird gar nicht erst gesendet.
         assertNull(liveStateOf("in_progress", scoreJson(standard.copy(display = SidePair("–", "AD"))))!!["points"])
+    }
+
+    @Test fun matchTiebreakSetsAreListedByIndexOnlyWhenPresent() {
+        fun live(vararg sets: SetScore) =
+            liveStateOf(
+                "awaiting_decision",
+                CloudJson.encodeToString(ScoreSummary.serializer(), ScoreSummary(sets = sets.toList())),
+            )!!
+        // Offenes Match: nach einem Champions-Tiebreak folgt noch ein Satz.
+        assertEquals(
+            CloudJson.parseToJsonElement("[1]"),
+            live(SetScore(6, 4), SetScore(10, 8, matchTiebreak = true), SetScore(3, 6))["matchTiebreakSets"],
+        )
+        assertNull(live(SetScore(6, 4), SetScore(10, 8))["matchTiebreakSets"], "Vorteilssatz 10:8 bleibt ohne Klammern")
     }
 
     @Test fun finishedOrUnreadableProjectionHasNoLiveState() {

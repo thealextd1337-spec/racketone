@@ -245,7 +245,7 @@ internal fun WatchedRow(
         Text(stringResource(Res.string.friends_feed_vs, names(match, Side.A), names(match, Side.B)), color = colors.text2)
         if (match.sets.isNotEmpty()) {
             Text(
-                match.sets.joinToString("  ") { (a, b) -> "$a:$b" },
+                match.setsText(),
                 color = colors.text,
                 modifier = Modifier.testTag("watching_sets_${match.id}"),
             )

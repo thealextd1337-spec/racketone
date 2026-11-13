@@ -42,6 +42,7 @@ import eu.advantly.ui.phone.resources.friends_feed_back
 import eu.advantly.ui.phone.resources.friends_feed_detail_hint
 import eu.advantly.ui.phone.resources.friends_feed_detail_title
 import eu.advantly.ui.phone.resources.friends_feed_empty
+import eu.advantly.ui.phone.resources.friends_feed_match_tiebreak
 import eu.advantly.ui.phone.resources.friends_feed_no_score
 import eu.advantly.ui.phone.resources.friends_feed_set
 import eu.advantly.ui.phone.resources.friends_feed_side_a
@@ -139,10 +140,23 @@ internal fun FeedDetail(
         }
         if (match.sets.isEmpty()) Text(stringResource(Res.string.friends_feed_no_score), color = AdvantlyTheme.colors.text2)
         match.sets.forEachIndexed { index, (a, b) ->
-            Text(stringResource(Res.string.friends_feed_set, index + 1, a, b), modifier = Modifier.testTag("friends_feed_set_$index"))
+            Text(
+                if (index in match.matchTiebreakSets) {
+                    stringResource(Res.string.friends_feed_match_tiebreak, a, b)
+                } else {
+                    stringResource(Res.string.friends_feed_set, index + 1, a, b)
+                },
+                modifier = Modifier.testTag("friends_feed_set_$index"),
+            )
         }
     }
 }
+
+/** Satzstände in einer Zeile, Match-Tiebreak in Klammern wie beim Zähler: „6:4  4:6  [10:8]“. */
+internal fun FeedMatch.setsText(): String =
+    sets.withIndex().joinToString("  ") { (index, set) ->
+        if (index in matchTiebreakSets) "[${set.first}:${set.second}]" else "${set.first}:${set.second}"
+    }
 
 @Composable
 internal fun headline(match: FeedMatch): String {

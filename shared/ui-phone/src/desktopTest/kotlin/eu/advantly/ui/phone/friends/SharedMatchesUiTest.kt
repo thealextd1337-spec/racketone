@@ -131,7 +131,7 @@ private val feedMatch =
         startedAt = "2026-10-26T09:00:00Z",
         status = "finished",
         winner = "A",
-        summary = Json.parseToJsonElement("""{"sets":[[6,4],[7,5]]}""") as JsonObject,
+        summary = Json.parseToJsonElement("""{"sets":[[6,4],[5,7],[10,8]],"matchTiebreakSets":[2]}""") as JsonObject,
         serverVersion = 1,
         participants = listOf(participant("s1", "A", "Carla mit sehr langem Alias", "carla-id"), participant("s2", "B", "")),
     )
@@ -220,7 +220,8 @@ class SharedMatchesUiTest {
                     screenshot("feed-de-200")
                     click("friends_feed_feed-1")
                     onNodeWithTag("friends_feed_winner").assertTextContains("Sieg: Carla mit sehr langem Alias")
-                    onNodeWithTag("friends_feed_set_1").assertTextContains("Satz 2: 7:5")
+                    onNodeWithTag("friends_feed_set_1").assertTextContains("Satz 2: 5:7")
+                    onNodeWithTag("friends_feed_set_2").assertTextContains("Match-Tiebreak: [10:8]")
                     onNodeWithTag("friends_feed_team_b").assertTextContains("Seite B: Spieler 2")
                     screenshot("feed-detail-de-200")
                     click("friends_feed_back")

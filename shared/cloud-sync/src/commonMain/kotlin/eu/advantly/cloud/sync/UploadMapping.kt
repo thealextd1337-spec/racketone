@@ -123,6 +123,13 @@ internal fun liveStateOf(
                 }
             }
         }
+        // Champions-Tiebreak (10:8) sonst nicht von einem Vorteilssatz unterscheidbar; Server reicht die Indizes durch.
+        score.sets
+            .take(9)
+            .withIndex()
+            .filter { it.value.matchTiebreak }
+            .takeIf { it.isNotEmpty() }
+            ?.let { tiebreaks -> putJsonArray("matchTiebreakSets") { tiebreaks.forEach { add(it.index) } } }
         current?.games?.let { games ->
             putJsonArray("games") {
                 add(games.a)

@@ -81,7 +81,32 @@ data class FeedMatch(
     val sets: List<Pair<Int, Int>>,
     /** Ergebnis nach dem Spiel von Hand korrigiert (`summary.corrected`, 0.3.0). */
     val corrected: Boolean = false,
+    /** Indizes in [sets], die ein Match-Tiebreak waren (Anzeige `[10:8]`); leer bei älteren Servern. */
+    val matchTiebreakSets: Set<Int> = emptySet(),
 )
+
+/**
+ * Match-Tiebreak-Sätze einer Projektion: bereinigt als `matchTiebreakSets` (Indexliste), roh für Mitglieder als
+ * `matchTiebreak` am Satz; nur Indizes innerhalb von [setCount].
+ */
+internal fun matchTiebreakSetsOf(
+    projection: JsonObject?,
+    setCount: Int,
+): Set<Int> {
+    val listed =
+        (projection?.get("matchTiebreakSets") as? JsonArray)
+            ?.mapNotNull { (it as? JsonPrimitive)?.takeUnless { p -> p.isString }?.intOrNull }
+            .orEmpty()
+    val marked =
+        (projection?.get("sets") as? JsonArray)
+            ?.withIndex()
+            ?.filter { (_, set) ->
+                ((set as? JsonObject)?.get("matchTiebreak") as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull ==
+                    true
+            }?.map { it.index }
+            .orEmpty()
+    return (listed + marked).filter { it in 0 until setCount }.toSet()
+}
 
 /**
  * Platz in einer Cloud-Ansicht, roh wie vom Server: Die UI macht daraus Namen, „Spieler N“ oder „Gelöschter Spieler“
@@ -151,5 +176,6 @@ internal fun PulledMatch.toFeed(): FeedMatch {
         teamB = team("B"),
         sets = sets,
         corrected = (summary?.get("corrected") as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull == true,
+        matchTiebreakSets = matchTiebreakSetsOf(summary, sets.size),
     )
 }
