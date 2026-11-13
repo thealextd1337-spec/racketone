@@ -42,7 +42,7 @@ internal fun FollowScore(
     val tiebreakPoints = watched.tiebreak && (watched.games == null || watched.games == 0 to 0)
     val pointPair = watched.points?.let { (a, b) -> a.toIntOrNull()?.let { x -> b.toIntOrNull()?.let { y -> x to y } } }
     val columns =
-        match.sets.map { (a, b) ->
+        match.sets.mapIndexed { index, (a, b) ->
             SetColumn(
                 SidePair(a, b),
                 null,
@@ -52,6 +52,7 @@ internal fun FollowScore(
                     else -> null
                 },
                 isCurrent = false,
+                isTiebreakSet = index in match.matchTiebreakSets,
             )
         } +
             listOfNotNull(

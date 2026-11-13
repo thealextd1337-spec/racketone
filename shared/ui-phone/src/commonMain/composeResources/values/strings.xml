@@ -901,6 +901,7 @@
     <string name="friends_feed_status_finished">Finished</string>
     <string name="friends_feed_winner">Winner: %1$s</string>
     <string name="friends_feed_set">Set %1$d: %2$d:%3$d</string>
+    <string name="friends_feed_match_tiebreak">Match tiebreak: [%1$d:%2$d]</string>
     <string name="friends_feed_side_a">Side A</string>
     <string name="friends_feed_side_b">Side B</string>
     <string name="friends_feed_detail_title">Shared match</string>

@@ -185,7 +185,7 @@ private fun LiveCard(
         Text(stringResource(Res.string.friends_feed_vs, names(match, Side.A), names(match, Side.B)), color = colors.text2)
         val score =
             listOfNotNull(
-                match.sets.takeIf { it.isNotEmpty() }?.joinToString("  ") { (a, b) -> "$a:$b" },
+                match.sets.takeIf { it.isNotEmpty() }?.let { match.setsText() },
                 entry.score.games?.let { (a, b) -> stringResource(Res.string.watching_games, a, b) },
                 entry.score.points?.let { (a, b) -> stringResource(Res.string.watching_live, a, b) },
                 stringResource(Res.string.watching_tiebreak).takeIf { entry.score.tiebreak },

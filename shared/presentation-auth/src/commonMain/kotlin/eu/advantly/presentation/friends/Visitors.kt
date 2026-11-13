@@ -276,6 +276,7 @@ internal fun VisitorView.toWatched(): WatchedMatch {
                 teamB = team("B"),
                 sets = sets,
                 corrected = (result?.get("corrected") as? JsonPrimitive)?.booleanOrNull == true,
+                matchTiebreakSets = matchTiebreakSetsOf(source, sets.size),
             ),
         games =
             pair("games")?.takeIf { running }?.let { (a, b) ->

@@ -347,6 +347,16 @@ class SharedMatchesViewModelTest {
         assertEquals(emptyList(), sets("""{"games":[1,0]}"""))
     }
 
+    @Test fun matchTiebreakSetsComeFromTheServerIndexListOrMemberObjects() {
+        fun mtb(json: String) = match("m", "feed", summary = Json.parseToJsonElement(json) as JsonObject).toFeed().matchTiebreakSets
+        assertEquals(setOf(2), mtb("""{"sets":[[6,4],[4,6],[10,8]],"matchTiebreakSets":[2]}"""))
+        assertEquals(setOf(1), mtb("""{"sets":[{"a":6,"b":4},{"a":10,"b":8,"matchTiebreak":true}]}"""))
+        // Ältere Server: kein Feld, also keine Klammern; Indizes außerhalb der Sätze oder als Text zählen nicht.
+        assertEquals(emptySet(), mtb("""{"sets":[[6,4],[10,8]]}"""))
+        assertEquals(emptySet(), mtb("""{"sets":[[6,4],[10,8]],"matchTiebreakSets":[2,"1",-1]}"""))
+        assertEquals(emptySet(), mtb("""{"sets":[[6,4],"x"],"matchTiebreakSets":[0]}"""))
+    }
+
     @Test fun hidingAlsoEndsSharingSoFriendsNoLongerSeeItInTheirFeed() =
         fixture {
             model.openMatch("linked")
