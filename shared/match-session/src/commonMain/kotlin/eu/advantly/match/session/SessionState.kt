@@ -13,6 +13,7 @@ import eu.advantly.core.model.TelemetryPreference
 import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.NextSetKind
+import eu.advantly.core.scoring.ScoreEvent
 import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.core.scoring.ServerChoice
 import eu.advantly.core.scoring.SidePair
@@ -238,4 +239,14 @@ sealed interface ScorerChoice {
 /** Callback-Variante von [MatchSession.state] (für die Swift-Facade ohne Flows). Aufruf auf dem Scheduler-Thread. */
 fun interface SessionListener {
     fun onStateChanged(state: SessionState)
+
+    /**
+     * Ein eigenes Event ist dauerhaft gespeichert (nach dem Commit) und angewandt; [state] ist der Stand danach. Kommt vor
+     * Kopf-Update, Versand und [onStateChanged] – für sofortige Rückmeldung am Platz (Haptik). Darf die Session nicht
+     * aufrufen.
+     */
+    fun onOwnEventCommitted(
+        event: ScoreEvent,
+        state: MatchState,
+    ) = Unit
 }
