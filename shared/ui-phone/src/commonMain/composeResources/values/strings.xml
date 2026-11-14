@@ -1109,4 +1109,5 @@
     <string name="guest_invite_share_text">I added you on Advantly as “%1$s”. Open the link to take over your matches (valid until %2$s): %3$s</string>
     <string name="guest_invite_open">Invitation open until %1$s</string>
     <string name="guest_invite_revoke">Withdraw invitation</string>
+    <string name="cloud_sync_checking_account">Checking your account…</string>
 </resources>
