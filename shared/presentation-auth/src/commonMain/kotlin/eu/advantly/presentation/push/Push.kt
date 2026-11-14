@@ -12,7 +12,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 // Push-Benachrichtigungen (docs/plan-live-mitspieler.md §3.3/§8). Die Nachricht trägt nur Art und IDs; den Text baut
-// die App lokal. Ohne Einwilligung gibt es kein Token, also auch keinen Upload.
+// die App lokal. Jedes angemeldete Handy lädt sein Token hoch (stiller Abgleich); der Schalter regelt nur die Anzeige.
 
 /** Android-Kanal je Kategorie. */
 enum class PushChannel { FRIENDS, MATCHES, SCORING }
@@ -98,8 +98,9 @@ interface NotificationSettingsPort {
     fun dismissHint()
 }
 
-/** Gerätelokal (nicht im Backup): Zustimmung, Hinweis und zuletzt hochgeladenes Konto + Token. */
+/** Gerätelokal (nicht im Backup): Anzeige gewünscht, Hinweis und zuletzt hochgeladenes Konto + Token. */
 interface PushPreferences {
+    /** Benachrichtigungen anzeigen; das Token hängt nicht daran. */
     var enabled: Boolean
     var hintDone: Boolean
 
@@ -115,8 +116,9 @@ interface PushTokenSource {
 }
 
 /**
- * Token-Logik: Upload nur mit Zustimmung ([PushPreferences.enabled]) und nutzbarer Kontositzung, je Prozess, Konto und
- * Token einmal (jeder Aufruf zählt serverseitig als Aktivität, 180-Tage-Regel). Ausschalten, Abmelden und Kontowechsel leeren das Server-Token und verwerfen das lokale.
+ * Token-Logik: Upload bei nutzbarer Kontositzung, unabhängig von [enabled] (Pushes stoßen auch still den Abgleich an),
+ * je Prozess, Konto und Token einmal (jeder Aufruf zählt serverseitig als Aktivität, 180-Tage-Regel). Abmelden,
+ * Löschantrag und Kontowechsel leeren das Server-Token und verwerfen das lokale; Ausschalten nicht.
  * Fehler bleiben still und werden beim nächsten [sync] wiederholt.
  */
 class PushRegistration(
@@ -134,7 +136,7 @@ class PushRegistration(
     private val mutableHint = MutableStateFlow(!prefs.hintDone && !prefs.enabled)
     val hint: StateFlow<Boolean> = mutableHint.asStateFlow()
 
-    /** Nach ausdrücklicher Zustimmung (und erteilter Systemberechtigung). */
+    /** Anzeige an (nach erteilter Systemberechtigung); lädt das Token hoch, falls noch nicht geschehen. */
     suspend fun enable() =
         mutex.withLock {
             setEnabled(true)
@@ -142,8 +144,8 @@ class PushRegistration(
         }
 
     /**
-     * Ausschalten, Abmelden, Löschantrag. Nach Abmelden oder Löschantrag ([signedOut]) bleibt Push aus, der einmalige
-     * Hinweis erscheint nach erneuter Anmeldung aber wieder.
+     * Anzeige aus; das Token bleibt für den stillen Abgleich. Abmelden und Löschantrag ([signedOut]) leeren es zusätzlich,
+     * der einmalige Hinweis erscheint nach erneuter Anmeldung wieder.
      */
     suspend fun disable(signedOut: Boolean = false) =
         mutex.withLock {
@@ -151,8 +153,8 @@ class PushRegistration(
             if (signedOut) {
                 prefs.hintDone = false
                 mutableHint.value = true
+                quietly { clear() }
             }
-            quietly { clear() }
         }
 
     fun dismissHint() {
@@ -160,14 +162,14 @@ class PushRegistration(
         mutableHint.value = false
     }
 
-    /** Neues Token, App-Start, nach jedem Abgleich: holt Ausstehendes nach. */
+    /** Neues Token, App-Start, nach jedem Abgleich: holt Ausstehendes nach (auch das Leeren nach einem Löschantrag). */
     suspend fun sync() =
         mutex.withLock {
             quietly {
-                if (prefs.enabled) {
+                if (session()?.deletionRequested == true) {
+                    if (prefs.uploaded != null) clear()
+                } else {
                     upload()
-                } else if (prefs.uploaded != null) {
-                    clear()
                 }
             }
         }
@@ -197,7 +199,8 @@ class PushRegistration(
 
     /**
      * Lokal zuerst (Auto-Init aus, Token löschen): Push ist sofort aus, auch wenn der Server gerade nicht erreichbar ist.
-     * Das Leeren des Server-Tokens holt [sync] nach, solange [PushPreferences.uploaded] gesetzt bleibt.
+     * Solange [PushPreferences.uploaded] gesetzt bleibt, holt [sync] das Leeren nach (Löschantrag) bzw. ersetzt das Token
+     * (erneute Anmeldung, Kontowechsel).
      */
     private suspend fun clear() {
         confirmed = null
