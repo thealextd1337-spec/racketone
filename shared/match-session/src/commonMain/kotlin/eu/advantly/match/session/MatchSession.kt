@@ -1638,7 +1638,8 @@ class MatchSession(
         event: ScoreEvent,
         state: MatchState,
     ) {
-        data.afterCommit { listeners.toList().forEach { it.onOwnEventCommitted(event, state) } }
+        // Rückmeldung ist best effort: Ein Fehler darin darf Kopf-Update und Versand des gespeicherten Events nicht verhindern.
+        data.afterCommit { listeners.toList().forEach { runCatching { it.onOwnEventCommitted(event, state) } } }
     }
 
     /** Belegte Sequenz (paralleler Schreiber): einmal mit frisch gelesenem Stand wiederholen, danach `null` statt still verlieren. */
