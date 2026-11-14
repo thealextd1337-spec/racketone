@@ -1036,10 +1036,15 @@
     <string name="live_back">Zurück</string>
     <string name="notifications_section">Benachrichtigungen</string>
     <string name="notifications_toggle">Push-Benachrichtigungen</string>
-    <string name="notifications_toggle_sub">Freundschaftsanfragen, Match-Einladungen und Bitten zu zählen. Namen ergänzt dein Handy; Google sieht nur IDs. Standardmäßig aus.</string>
+    <string name="notifications_toggle_sub">Benachrichtigungen anzeigen bei Freundschaftsanfragen, Match-Einladungen und Bitten zu zählen. Namen ergänzt dein Handy; Google sieht nur IDs.</string>
     <string name="notifications_hint">Benachrichtigen, wenn Freunde dich in ein Match eintragen oder zum Zuschauen oder Zählen einladen?</string>
     <string name="notifications_hint_enable">Einschalten</string>
     <string name="notifications_hint_later">Nicht jetzt</string>
+    <string name="notifications_prompt_title">Kein Match verpassen</string>
+    <string name="notifications_prompt_body">Erfahre sofort, wenn dich ein Freund in ein Match einträgt oder deine Einladung annimmt.</string>
+    <string name="notifications_prompt_more">Auch wenn dich jemand zum Zuschauen oder Zählen einlädt. Ausschalten kannst du jederzeit im Profil.</string>
+    <string name="notifications_prompt_enable">Benachrichtigungen einschalten</string>
+    <string name="notifications_prompt_later">Später</string>
     <!-- Cloud-Ansichten (0.6.3): unbenannte bzw. redigierte Plätze -->
     <string name="player_slot_n">Spieler %1$d</string>
     <string name="player_deleted">Gelöschter Spieler</string>
