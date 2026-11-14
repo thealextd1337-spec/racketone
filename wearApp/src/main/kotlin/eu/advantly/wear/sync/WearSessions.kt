@@ -12,6 +12,7 @@ import eu.advantly.match.session.SessionListener
 import eu.advantly.match.session.SyncStatus
 import eu.advantly.sync.protocol.CompatibilityStatus
 import eu.advantly.sync.protocol.PeerKind
+import eu.advantly.wear.diagnostics.AndroidTrace
 import eu.advantly.wear.diagnostics.DiagnosticLog
 
 /**
@@ -79,6 +80,7 @@ object WearSessions {
         var prepared: Holder? = null
         holder = null
         AndroidMatchSessions.prepare(app, PeerKind.WATCH) { session, stage ->
+            session.trace = AndroidTrace
             val local = Holder(session, WearPrefs(app)).also { it.prefs.openMatchId?.let(session::resume) }
             prepared = local
             stage.onDiscard { if (holder === local) holder = null }

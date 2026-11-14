@@ -12,6 +12,7 @@ import eu.advantly.device.link.testing.ManualScheduler
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.RandomIdGenerator
 import eu.advantly.match.session.SessionConfig
+import eu.advantly.match.session.SessionTrace
 import eu.advantly.match.session.WallClock
 import eu.advantly.presentation.match.LocalDay
 import eu.advantly.sync.protocol.PeerKind
@@ -44,6 +45,8 @@ class PlayerIds {
 class WatchHarness(
     today: LocalDay = LocalDay(2026, 10, 15),
     latencyMs: Long = 20,
+    val watchData: LocalData = testLocalData(),
+    trace: SessionTrace = SessionTrace.NONE,
 ) {
     private var messages = 0
     val scheduler = ManualScheduler()
@@ -53,7 +56,6 @@ class WatchHarness(
     var wallOffsetMs = 0L
     val clock = WallClock { BASE_MS + scheduler.nowMs() + wallOffsetMs }
     val phoneData = testLocalData()
-    val watchData = testLocalData()
     val phone = session("phone", PeerKind.PHONE, phoneData, seed = 1)
     val watch = session("watch", PeerKind.WATCH, watchData, seed = 2)
     val prefs = FakePrefs()
@@ -73,9 +75,11 @@ class WatchHarness(
             uptime = scheduler::nowMs,
             today = { today },
             liveHealth = { liveHealth },
+            trace = trace,
         )
 
     init {
+        watch.trace = trace
         phone.start()
         watch.start()
         controller.effects = { effects += it }
