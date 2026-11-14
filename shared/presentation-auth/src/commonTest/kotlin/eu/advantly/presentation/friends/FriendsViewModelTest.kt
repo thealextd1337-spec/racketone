@@ -7,6 +7,8 @@ import eu.advantly.cloud.sync.ConsentStatus
 import eu.advantly.cloud.sync.FoundProfile
 import eu.advantly.cloud.sync.FriendRequestResult
 import eu.advantly.cloud.sync.FriendsPort
+import eu.advantly.cloud.sync.LiveSignal
+import eu.advantly.cloud.sync.LiveSignalsPort
 import eu.advantly.cloud.sync.PulledFriendship
 import eu.advantly.presentation.auth.FakePhoneAuth
 import eu.advantly.presentation.auth.PhonePullPort
@@ -17,7 +19,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -373,5 +380,95 @@ class FriendsViewModelTest {
             model.close()
             scope.cancel()
         }
+    }
+
+    /** Live-Signale mit echter Zeit auf einem Thread (300-ms-Bündelung); Sammler zählen Abos je Konto. */
+    private class FakeSignals : LiveSignalsPort {
+        val flow = MutableSharedFlow<LiveSignal>()
+        val profiles = mutableListOf<String>()
+        var active = 0
+
+        override fun signals(profileId: String) =
+            flow
+                .onStart {
+                    profiles += profileId
+                    active++
+                }.onCompletion { active-- }
+    }
+
+    private fun liveSignals(test: suspend CoroutineScope.(FriendsViewModel, FakeLive, FakeSignals, FakePhoneAuth) -> Unit) =
+        runBlocking {
+            val scope = CoroutineScope(coroutineContext + Job())
+            val auth = FakePhoneAuth().apply { session.value = alice() }
+            val live = FakeLive()
+            val signals = FakeSignals()
+            val model = FriendsViewModel(auth, NoFriendsPort, { emptyList() }, null, scope, liveMatches = live, liveSignals = signals)
+            try {
+                delay(SETTLE_MS)
+                test(model, live, signals, auth)
+            } finally {
+                model.close()
+                scope.cancel()
+            }
+        }
+
+    @Test fun liveSignalsLoadAtOnceWhenSubscribedAndBundleChanges() =
+        liveSignals { model, live, signals, _ ->
+            val follow = checkNotNull(model.followLive())
+            val second = checkNotNull(model.followLive())
+            delay(SETTLE_MS)
+            assertEquals(listOf("alice"), signals.profiles, "ein gemeinsames Abo")
+            signals.flow.emit(LiveSignal.SUBSCRIBED)
+            delay(SETTLE_MS)
+            assertTrue(model.state.value.liveRealtime)
+            assertEquals(1, live.calls.size, "Beitritt lädt sofort")
+
+            repeat(5) { signals.flow.emit(LiveSignal.CHANGED) }
+            delay(SETTLE_MS)
+            assertEquals(1, live.calls.size, "Signale warten die Bündelung ab")
+            delay(LIVE_SIGNAL_BUNDLE_MS)
+            assertEquals(2, live.calls.size, "fünf Signale, eine Abfrage")
+
+            signals.flow.emit(LiveSignal.LOST)
+            delay(SETTLE_MS)
+            assertFalse(model.state.value.liveRealtime, "getrennt: Polling wie ohne Realtime")
+            follow.cancel()
+            delay(SETTLE_MS)
+            assertEquals(1, signals.active, "zweiter Aufrufer hält das Abo")
+            second.cancel()
+            delay(SETTLE_MS)
+            assertEquals(0, signals.active)
+        }
+
+    @Test fun liveSignalsFollowOnlyWhenReadyAndRestartOnSessionChange() =
+        liveSignals { model, live, signals, auth ->
+            auth.session.value = alice().copy(onboarded = false)
+            delay(SETTLE_MS)
+            val follow = checkNotNull(model.followLive())
+            delay(SETTLE_MS)
+            assertTrue(signals.profiles.isEmpty(), "nur bei READY")
+            auth.session.value = alice(generation = 2)
+            delay(SETTLE_MS)
+            assertEquals(listOf("alice"), signals.profiles)
+
+            signals.flow.emit(LiveSignal.SUBSCRIBED)
+            signals.flow.emit(LiveSignal.CHANGED)
+            delay(SETTLE_MS)
+            val loads = live.calls.size
+            auth.session.value = CloudSession("bob", true, generation = 3, consentStatus = ConsentStatus.CURRENT)
+            delay(LIVE_SIGNAL_BUNDLE_MS + SETTLE_MS)
+            assertEquals(loads, live.calls.size, "Kontowechsel verwirft die gebündelte Abfrage")
+            assertFalse(model.state.value.liveRealtime)
+            assertEquals(listOf("alice", "bob"), signals.profiles, "Abo neu für das neue Konto")
+            assertEquals(1, signals.active)
+
+            auth.session.value = null
+            delay(SETTLE_MS)
+            assertEquals(0, signals.active, "Abmelden beendet das Abo")
+            follow.cancel()
+        }
+
+    private companion object {
+        const val SETTLE_MS = 50L
     }
 }

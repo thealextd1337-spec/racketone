@@ -58,6 +58,8 @@ import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.logging.LogLevel
 import io.github.jan.supabase.postgrest.Postgrest
+import io.github.jan.supabase.realtime.Realtime
+import io.github.jan.supabase.realtime.realtime
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -119,6 +121,7 @@ internal fun ComponentActivity.createPhoneAccount(
                     core.backend,
                     core.scorers,
                     core.backend,
+                    liveSignals = core.liveSignals,
                 ),
             invitations = InvitationsViewModel(account, core.backend, savedState, account.scope, System::currentTimeMillis, pull),
             sync = core.sync,
@@ -200,9 +203,12 @@ internal class PhoneAccountCore private constructor(
                 enableLifecycleCallbacks = false
             }
             install(Postgrest)
+            // Nur Live-Signale (PhoneLiveSignals); verbindet erst beim ersten Kanal-Abo.
+            install(Realtime)
         }
     private val session = AndroidMatchSessions.get(context, PeerKind.PHONE)
     val runtime = AndroidAccountRuntime(context, session)
+    val liveSignals = PhoneLiveSignals(client.realtime, runtime.scope)
     val record = AndroidPhoneSyncRecord(context)
     val auth =
         SupabasePhoneAuth(
