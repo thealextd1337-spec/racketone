@@ -65,8 +65,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 
-/** Bereich „Live“ und Detail: Abfrage alle 5 s, solange sichtbar (Realtime ist aus, plan-live-mitspieler E1). */
+/** Bereich „Live“ und Detail: Abfrage alle 5 s, solange sichtbar und ohne Live-Signalkanal. */
 internal const val LIVE_POLL_MS = 5_000L
+
+/** Mit Live-Signalkanal (Plan W12 Entscheidung 6): Polling nur als Rückfall, falls ein Signal verloren geht. */
+internal const val LIVE_REALTIME_POLL_MS = 30_000L
+
+/** Startseite mit Live-Signalkanal. */
+internal const val HOME_REALTIME_POLL_MS = 60_000L
 
 /** Startseite: nur der Hinweis auf laufende Fremd-Matches, daher seltener – 15 s, solange zuletzt etwas live war. */
 internal const val HOME_LIVE_POLL_MS = 15_000L
@@ -77,6 +83,7 @@ internal const val HOME_IDLE_POLL_MS = 60_000L
 /**
  * Fragt „Live“ alle [intervalMs] ab, solange die App im Vordergrund und die Ansicht sichtbar ist; liefert die Uhrzeit
  * im Sekundentakt für „Stand vor X s“. Ein geänderter Takt zählt ab der letzten Abfrage, ohne den Effekt neu zu starten.
+ * Verfolgt in derselben Zeit die Live-Signale ([FriendsViewModel.followLive]), die sofort neu laden.
  */
 @Composable
 private fun rememberLivePolling(
@@ -88,6 +95,7 @@ private fun rememberLivePolling(
     val interval by rememberUpdatedState(intervalMs)
     val scope = rememberCoroutineScope()
     LifecycleResumeEffect(model) {
+        val follow = model.followLive()
         val job =
             scope.launch {
                 var last: Long? = null
@@ -101,7 +109,10 @@ private fun rememberLivePolling(
                     delay(1_000)
                 }
             }
-        onPauseOrDispose { job.cancel() }
+        onPauseOrDispose {
+            job.cancel()
+            follow?.cancel()
+        }
     }
     return now
 }
@@ -114,7 +125,7 @@ internal fun LiveSection(
     clock: WallClock,
     onOpen: (String) -> Unit,
 ) {
-    val now = rememberLivePolling(model, LIVE_POLL_MS, clock)
+    val now = rememberLivePolling(model, if (state.liveRealtime) LIVE_REALTIME_POLL_MS else LIVE_POLL_MS, clock)
     // Beendete Zuschau-Matches liefert „Live“ nicht mehr; ihr Ergebnis einmal je Öffnen.
     LaunchedEffect(model) { model.loadWatching() }
     val colors = AdvantlyTheme.colors
@@ -157,7 +168,13 @@ fun HomeLiveSection(
     val state by model.state.collectAsState()
     if (state.access != FriendsAccess.READY || !model.hasLive) return
     val live = state.live.orEmpty()
-    val now = rememberLivePolling(model, if (live.isEmpty()) HOME_IDLE_POLL_MS else HOME_LIVE_POLL_MS, clock)
+    val interval =
+        when {
+            state.liveRealtime -> HOME_REALTIME_POLL_MS
+            live.isEmpty() -> HOME_IDLE_POLL_MS
+            else -> HOME_LIVE_POLL_MS
+        }
+    val now = rememberLivePolling(model, interval, clock)
     if (live.isEmpty()) return
     Column(Modifier.fillMaxWidth().testTag("home_live")) {
         SectionTitle(stringResource(Res.string.live_badge))
@@ -247,7 +264,7 @@ fun LiveFollowScreen(
     onScore: (String) -> Unit = {},
 ) {
     val state by model.state.collectAsState()
-    val now = rememberLivePolling(model, LIVE_POLL_MS, clock)
+    val now = rememberLivePolling(model, if (state.liveRealtime) LIVE_REALTIME_POLL_MS else LIVE_POLL_MS, clock)
     val current = state.live?.firstOrNull { it.matchId == matchId }
     var last by remember(matchId) { mutableStateOf<LiveEntry?>(null) }
     SideEffect { if (current != null) last = current }

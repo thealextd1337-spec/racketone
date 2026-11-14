@@ -536,3 +536,12 @@ Pläne: [docs/plan-einladungen.md](../docs/plan-einladungen.md) §3.5 und [docs/
 | Migration | Inhalt | Tests |
 |---|---|---|
 | `20261113000100_match_tiebreak_saetze.sql` | `sanitize_projection` gibt zusätzlich `matchTiebreakSets` aus (0-basierte Indizes in `sets`), aus `matchTiebreak: true` am Satz (Summary) oder der Indexliste im Live-Stand; nur gültige, eindeutige Indizes, aufsteigend. `sets` bleibt `[[a,b],…]`, ältere Clients ignorieren das Feld. Wirkt beim Lesen, kein Backfill | 530, 340 |
+
+## W12: Live per Supabase Realtime (Signale)
+
+| Migration | Inhalt | Tests |
+|---|---|---|
+| `20261114000300_live_signale.sql` | Privater Kanal `live:<profile_uuid>` je Konto, Ereignis `changed` mit leerem Payload; die App lädt danach per RPC (`cloud_my_live_matches_v1`). `can_receive_realtime` erlaubt nur das eigene Thema mit gebundener JWT-Sitzung (`auth.sessions` gültig, `cloud_session_bindings`/Installation/Gerät nicht widerrufen, `cloud_profile_allowed`), ohne Installationsnachweis (WebSockets tragen keine REST-Header); wirft nie. `cloud_realtime_closed` (authenticated) öffnet nur Lesen von Broadcasts, `with check (false)`; neu `cloud_realtime_closed_anon` hält anon ganz zu. Alte Themen (`match:`, `match-live:`, `tournament:`) bleiben zu, `realtime_send` bleibt Leerlauf. `send_live_signal` (Guard `to_regprocedure`, je Konto ein Signal pro Transaktion). Empfänger: Mitspieler mit Konto, Zähler-Personen (invited/accepted), nicht widerrufene Zuschauer; ohne Ersteller, Blockierung mit dem Ersteller, ausgeblendete Teilnahme. Trigger: `matches` (live_state, status, deleted_at, access_epoch; laufend oder gerade beendet), `match_participants` (profile_id, hidden), `match_roles` (profile_id, status), `match_visitors` (profile_id, revoked_at) – alte und neue Person, wer die Sicht verliert, bekommt ein letztes Signal –, `user_blocks` (beide Seiten). Ohne Realtime-Schema Leerlauf. 0.7.1 tritt keinem Kanal bei und bleibt unverändert | 540, 170 |
+
+**Betrieb (Dashboard, kein SQL):** vor dem App-Release Realtime → Settings → „Allow public access“ **aus** (private_only),
+sonst umgehen öffentliche Kanäle die Policy. Danach bestehende Sockets trennen (Realtime neu starten).

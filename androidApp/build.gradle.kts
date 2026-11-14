@@ -42,6 +42,8 @@ dependencies {
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play)
     implementation(libs.google.id)
+    // Live-Signale über privaten Realtime-Kanal (PhoneLiveSignals); nur hier, nicht in den Shared-Modulen
+    implementation(libs.supabase.realtime)
     // Push ohne google-services-Plugin: Firebase wird manuell aus BuildConfig initialisiert (AndroidPush).
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)

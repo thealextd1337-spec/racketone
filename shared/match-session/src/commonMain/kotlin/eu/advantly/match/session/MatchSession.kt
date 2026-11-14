@@ -28,6 +28,7 @@ import eu.advantly.core.scoring.GameServer
 import eu.advantly.core.scoring.GameServersCorrected
 import eu.advantly.core.scoring.MatchCreated
 import eu.advantly.core.scoring.MatchEnded
+import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.Paused
@@ -406,6 +407,9 @@ class MatchSession(
     private var dataRevision = 0L
     private var lifecycleRevision = 0L
     private var removeDirectoryObserver: (() -> Unit)? = null
+
+    /** Messabschnitte des eigenen Schreibpfads (Wear OS: `android.os.Trace`); nur auf dem Session-Thread setzen. */
+    var trace: SessionTrace = SessionTrace.NONE
 
     /** Ein Post je Signalschwall; vor dem Lesen zurückgesetzt, damit keine Änderung verloren geht. */
     @Volatile
@@ -1614,15 +1618,28 @@ class MatchSession(
         m: OpenMatch,
         payload: EventPayload,
     ): ScoreEvent? {
-        val event = appendOwn(m, payload) ?: return null
+        val event = trace.section("commit") { appendOwn(m, payload) } ?: return null
         devicesIn(m.id) += deviceId.value
-        m.engine = ScoringEngine.applyAll(m.engine, listOf(event))
+        m.engine = trace.section("engine") { ScoringEngine.applyAll(m.engine, listOf(event)) }
+        notifyCommitted(event, m.engine.state)
         if (payload is PlayerAssigned) reconcilePeople(m.id)
-        persistProgress(m)
-        broadcast(Events(m.id, listOf(event)))
+        trace.section("header") { persistProgress(m) }
+        trace.section("send") { broadcast(Events(m.id, listOf(event))) }
         maybeFollow(null)
-        publish()
+        trace.section("publish") { publish() }
         return event
+    }
+
+    /**
+     * Sofortige Rückmeldung (Haptik am Platz, Paket 5): erst nach dem Commit des Events – auch wenn ein Aufrufer [emit] in
+     * eine äußere Transaktion legt –, aber vor Kopf, Versand und [publish].
+     */
+    private fun notifyCommitted(
+        event: ScoreEvent,
+        state: MatchState,
+    ) {
+        // Rückmeldung ist best effort: Ein Fehler darin darf Kopf-Update und Versand des gespeicherten Events nicht verhindern.
+        data.afterCommit { listeners.toList().forEach { runCatching { it.onOwnEventCommitted(event, state) } } }
     }
 
     /** Belegte Sequenz (paralleler Schreiber): einmal mit frisch gelesenem Stand wiederholen, danach `null` statt still verlieren. */

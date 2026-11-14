@@ -11,6 +11,7 @@ import eu.advantly.cloud.sync.ConsentStatus
 import eu.advantly.cloud.sync.IdTokenProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -392,6 +393,65 @@ class AuthViewModelTest {
             assertTrue(model.state.value.unconfirmed, reason)
             assertFalse(model.state.value.accountRequired, reason)
         }
+    }
+
+    /** Fake mit 401 ohne Grund, solange [expired] gilt (Access-Token vor seiner Erneuerung). */
+    private class ExpiringAuth : FakePhoneAuth() {
+        var expired = true
+
+        override suspend fun refreshProfile() {
+            super.refreshProfile()
+            if (expired) throw CloudException("cloud_connection_failed", true)
+        }
+    }
+
+    @Test fun expiredTokenIsRecheckedOnceAfterRenewalAndHealsUnconfirmed() {
+        val auth = ExpiringAuth().also { it.session.value = CloudSession("alice", true) }
+        val renewal = Channel<Unit>(Channel.UNLIMITED)
+        val model = AuthViewModel(auth, scope, awaitTokenRenewal = { renewal.receive() })
+        // Während des Wartens: noch unbestätigt, aber kein Fehler (kein „Keine Verbindung“).
+        assertTrue(model.state.value.unconfirmed)
+        assertNull(model.state.value.error)
+        assertEquals(1, auth.calls.count { it == "refresh" })
+        auth.expired = false
+        renewal.trySend(Unit)
+        assertEquals(2, auth.calls.count { it == "refresh" })
+        assertFalse(model.state.value.unconfirmed)
+        assertNull(model.state.value.error)
+        assertEquals(AuthStep.ACCOUNT, model.state.value.step)
+    }
+
+    @Test fun persistentRejectionIsRetriedExactlyOnceAndStaysVisible() {
+        val auth = ExpiringAuth().also { it.session.value = CloudSession("alice", true) }
+        var waits = 0
+        val model = AuthViewModel(auth, scope, awaitTokenRenewal = { waits++ })
+        assertEquals(1, waits)
+        assertEquals(2, auth.calls.count { it == "refresh" })
+        assertTrue(model.state.value.unconfirmed)
+        assertEquals("cloud_connection_failed", model.state.value.error)
+        assertFalse(model.state.value.busy)
+        // Echte Netzfehler warten nicht und wiederholen nicht.
+        auth.expired = false
+        auth.failure = "connection_failed"
+        model.refresh()
+        assertEquals(1, waits)
+        assertEquals(3, auth.calls.count { it == "refresh" })
+        assertEquals("connection_failed", model.state.value.error)
+    }
+
+    @Test fun hostConfirmedSessionHealsUnconfirmedWithoutPassingThroughNull() {
+        val auth =
+            FakePhoneAuth().also {
+                it.session.value = CloudSession("alice", true)
+                it.failure = "connection_failed"
+            }
+        val model = AuthViewModel(auth, scope)
+        assertTrue(model.state.value.unconfirmed)
+        auth.failure = null
+        // Der Host prüft das Konto selbst und veröffentlicht ein geändertes Profil desselben Kontos.
+        auth.session.value = CloudSession("alice", true, consentStatus = ConsentStatus.CURRENT)
+        assertFalse(model.state.value.unconfirmed)
+        assertEquals(AuthStep.ACCOUNT, model.state.value.step)
     }
 
     @Test fun unreleasedCatalogPausesBackupButOnlyBlocksUnfinishedOnboarding() {

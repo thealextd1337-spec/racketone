@@ -93,13 +93,21 @@ class PushNotificationsTest {
         assertEquals(PushTarget(FriendsSection.LIVE, MATCH), intent.pushTarget())
     }
 
-    @Test fun deliveryIsDroppedWhenSwitchedOff() {
+    /** Schalter aus: keine Anzeige, aber Abgleich. Ohne lokales Konto (altes Token) weder noch. */
+    @Test fun switchedOffShowsNothingButStillSyncs() {
         shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
-        deliverPush(context, PushMessage(PushKind.FRIEND_REQUEST))
+        val synced = mutableListOf<String>()
+        val account = { _: Context -> ALEX to mapOf(MATCH to "Mia") }
+        val sync = { _: Context, profile: String -> synced += profile }
+        deliverPush(context, PushMessage(PushKind.FRIEND_REQUEST), { null }, sync)
+        assertTrue(synced.isEmpty())
+        deliverPush(context, PushMessage(PushKind.FRIEND_REQUEST), account, sync)
         assertTrue(shadowOf(manager).allNotifications.isEmpty())
+        assertEquals(listOf(ALEX), synced)
         AndroidPushPreferences(context).enabled = true
-        deliverPush(context, PushMessage(PushKind.FRIEND_REQUEST))
-        assertEquals("You have a new friend request", shadowOf(shadowOf(manager).allNotifications.single()).contentTitle)
+        deliverPush(context, PushMessage(PushKind.FRIEND_REQUEST, profileId = MATCH), account, sync)
+        assertEquals("Mia wants to be friends", shadowOf(shadowOf(manager).allNotifications.single()).contentTitle)
+        assertEquals(listOf(ALEX, ALEX), synced)
         context
             .getSharedPreferences(AndroidPushPreferences.FILE, Context.MODE_PRIVATE)
             .edit()
@@ -128,7 +136,6 @@ class PushNotificationsTest {
         val prefs =
             object : PushPreferences {
                 override var enabled = false
-                override var hintDone = false
                 override var uploaded: String? = null
             }
         val tokens =

@@ -37,9 +37,13 @@ UPDATE player SET kind = 'ARCHIVED' WHERE id = ? AND kind = 'GUEST';
 placeholderIds:
 SELECT id FROM player WHERE kind = 'PLACEHOLDER';
 
+-- Korreliertes EXISTS statt `id IN (SELECT id FROM replica_readable_player)`: SQLite prüft die View dann nur für die
+-- gefundenen Zeilen (PK-Lookup) statt sie für alle Spieler zu materialisieren (Uhr: ~18 ms je Aufruf, Paket 5).
 selectReadableById:
-SELECT * FROM player WHERE id = ? AND id IN (SELECT id FROM replica_readable_player);
+SELECT * FROM player WHERE id = ? AND EXISTS (SELECT 1 FROM replica_readable_player r WHERE r.id = player.id);
 selectReadableAll:
-SELECT * FROM player WHERE id IN (SELECT id FROM replica_readable_player) ORDER BY kind DESC, coalesce(last_used_at_ms, 0) DESC, display_name, id;
+SELECT * FROM player WHERE EXISTS (SELECT 1 FROM replica_readable_player r WHERE r.id = player.id)
+ORDER BY kind DESC, coalesce(last_used_at_ms, 0) DESC, display_name, id;
 selectReadableSelf:
-SELECT * FROM player WHERE kind = 'SELF' AND id IN (SELECT id FROM replica_readable_player) ORDER BY created_at_ms, id LIMIT 1;
+SELECT * FROM player WHERE kind = 'SELF' AND EXISTS (SELECT 1 FROM replica_readable_player r WHERE r.id = player.id)
+ORDER BY created_at_ms, id LIMIT 1;

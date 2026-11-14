@@ -4,7 +4,7 @@ import {
   handler,
   SEND_DEADLINE_MS,
 } from "./handler.ts";
-import { fcm, type Send } from "./fcm.ts";
+import { android, fcm, type Send } from "./fcm.ts";
 import { type Backend, backend } from "../export-my-data/backend.ts";
 
 function assert(v: unknown, message = "assertion failed"): asserts v {
@@ -358,11 +358,53 @@ Deno.test("fcm signs a verifiable RS256 assertion, caches the token and maps FCM
         JSON.stringify({
           token: "ok",
           data,
-          android: { priority: "high", ttl: "3600s" },
+          android: {
+            priority: "normal",
+            ttl: "3600s",
+            collapse_key: "friend_request:-",
+          },
         }),
     );
   } finally {
     globalThis.fetch = original;
+  }
+});
+
+Deno.test("fcm sends only handovers with high priority and collapses per kind and subject", () => {
+  const profile = "0190a5f2-2222-7000-8000-000000000002";
+  const cases: [Record<string, string>, string, string][] = [
+    [
+      { v: "1", kind: "scorer_invited", matchId: match, profileId: profile },
+      "high",
+      `scorer_invited:${match}`,
+    ],
+    [
+      { v: "1", kind: "scorer_responded", matchId: match },
+      "high",
+      `scorer_responded:${match}`,
+    ],
+    [
+      { v: "1", kind: "scorer_changed", matchId: match },
+      "normal",
+      `scorer_changed:${match}`,
+    ],
+    [
+      { v: "1", kind: "match_shared", matchId: match, profileId: profile },
+      "normal",
+      `match_shared:${match}`,
+    ],
+    [
+      { v: "1", kind: "friend_accepted", profileId: profile },
+      "normal",
+      `friend_accepted:${profile}`,
+    ],
+    [{ v: "1", kind: "friend_request" }, "normal", "friend_request:-"],
+  ];
+  for (const [data, priority, key] of cases) {
+    const options = android(data);
+    assert(options.priority === priority, `${data.kind}: ${options.priority}`);
+    assert(options.collapse_key === key, options.collapse_key);
+    assert(options.ttl === "3600s");
   }
 });
 

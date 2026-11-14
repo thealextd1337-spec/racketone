@@ -12,12 +12,17 @@ import io.github.jan.supabase.auth.user.UserSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.security.SecureRandom
+import java.util.Base64
 import java.util.UUID
 
 /** Kein Fallback auf Klartext; Keystore-/Dateifehler brechen die Cloud-Initialisierung ab, lokales Zählen bleibt möglich. */
 class PhoneAuthStorage(
     context: Context,
+    /** Backend dieses Builds; eine Sitzung eines anderen Backends (z. B. Staging → Produktion) gilt als abgemeldet. */
+    private val apiUrl: String? = null,
 ) : SessionManager,
     SupportDraftStorage {
     private val prefs =
@@ -87,13 +92,20 @@ class PhoneAuthStorage(
 
     override suspend fun saveSession(session: UserSession) =
         withContext(Dispatchers.IO) {
-            check(prefs.edit().putString("session", json.encodeToString(session)).commit())
+            val edit = prefs.edit().putString("session", json.encodeToString(session))
+            if (apiUrl != null) edit.putString("session_backend", apiUrl)
+            check(edit.commit())
         }
 
     override suspend fun loadSession(): UserSession =
         withContext(Dispatchers.IO) {
             val value = prefs.getString("session", null) ?: throw NoSessionFoundException()
-            json.decodeFromString(value)
+            val session = json.decodeFromString<UserSession>(value)
+            if (apiUrl != null && foreignSession(prefs.getString("session_backend", null), session.accessToken, apiUrl)) {
+                check(prefs.edit().remove("session").commit())
+                throw NoSessionFoundException()
+            }
+            session
         }
 
     override suspend fun deleteSession() =
@@ -112,3 +124,26 @@ internal fun resetCloudIdentity(prefs: SharedPreferences) =
             .remove("cloud_installation_proof_v1")
             .commit(),
     )
+
+/**
+ * Gehört die gespeicherte Sitzung zu einem anderen Backend? Maßgeblich ist das beim Speichern gemerkte Backend; Sitzungen
+ * aus Builds davor erkennt der Aussteller (`iss`) des Access-Tokens. Ohne lesbares `iss` gilt sie als eigene, damit ein
+ * fremdes Tokenformat niemanden dauerhaft abmeldet.
+ */
+internal fun foreignSession(
+    storedBackend: String?,
+    accessToken: String,
+    apiUrl: String,
+): Boolean {
+    if (storedBackend != null) return storedBackend != apiUrl
+    val issuer =
+        runCatching {
+            val payload = String(Base64.getUrlDecoder().decode(accessToken.split('.')[1]))
+            Json
+                .parseToJsonElement(payload)
+                .jsonObject["iss"]
+                ?.jsonPrimitive
+                ?.content
+        }.getOrNull() ?: return false
+    return !issuer.startsWith(apiUrl.trimEnd('/'))
+}

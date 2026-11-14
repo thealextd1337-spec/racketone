@@ -17,7 +17,6 @@ private const val ALEX = "0190a5f2-2222-7000-8000-000000000002"
 class PushRegistrationTest {
     private class Prefs : PushPreferences {
         override var enabled = false
-        override var hintDone = false
         override var uploaded: String? = null
     }
 
@@ -51,14 +50,16 @@ class PushRegistrationTest {
         fun registration() = PushRegistration(prefs, tokens, port) { session }
     }
 
-    @Test fun noTokenIsFetchedOrUploadedWithoutConsent(): Unit =
+    /** Stiller Abgleich: Das Token kommt auch mit ausgeschalteter Anzeige hoch. */
+    @Test fun tokenIsUploadedWhileDisplayIsOff(): Unit =
         runBlocking {
             val rig = Rig()
             val push = rig.registration()
             assertFalse(push.enabled.value)
-            assertTrue(push.hint.value)
             push.sync()
-            assertEquals(emptyList(), rig.log)
+            assertEquals(listOf("token", "set:alice:fcm:t1"), rig.log)
+            assertEquals("alice\nt1", rig.prefs.uploaded)
+            assertFalse(push.enabled.value)
         }
 
     @Test fun consentUploadsOnceAndNewTokensAgain(): Unit =
@@ -67,7 +68,6 @@ class PushRegistrationTest {
             val push = rig.registration()
             push.enable()
             assertTrue(push.enabled.value)
-            assertFalse(push.hint.value)
             push.sync()
             rig.token = "t7"
             push.sync()
@@ -95,47 +95,57 @@ class PushRegistrationTest {
             assertEquals(emptyList(), rig.log)
         }
 
-    @Test fun disableClearsServerTokenAndDeletesLocally(): Unit =
+    @Test fun switchingOffKeepsTheTokenSigningOutClearsIt(): Unit =
         runBlocking {
             val rig = Rig()
             val push = rig.registration()
             push.enable()
             rig.log.clear()
             push.disable()
+            assertEquals(emptyList(), rig.log, "nur die Anzeige ist aus")
+            assertEquals("alice\nt1", rig.prefs.uploaded)
+            assertFalse(rig.prefs.enabled)
+            push.sync()
+            assertEquals(listOf("token"), rig.log, "bestätigtes Token wird nicht erneut gesetzt")
+            rig.log.clear()
+            push.disable(signedOut = true)
             assertEquals(listOf("delete", "set:alice:fcm:null"), rig.log)
             assertNull(rig.prefs.uploaded)
-            assertFalse(rig.prefs.enabled)
-            rig.log.clear()
-            push.sync()
-            assertEquals(emptyList(), rig.log)
         }
 
-    @Test fun failedClearIsRetriedAndSignedOutAccountOnlyDeletesLocally(): Unit =
+    @Test fun failedClearIsRetriedAfterDeletionRequestAndReplacedAfterSignIn(): Unit =
         runBlocking {
             val rig = Rig()
             val push = rig.registration()
             push.enable()
             rig.serverDown = true
             rig.log.clear()
-            push.disable()
+            push.disable(signedOut = true)
             assertEquals(listOf("delete"), rig.log, "M1: lokal sofort aus (Token gelöscht), auch ohne Server")
             assertEquals("alice\nt1", rig.prefs.uploaded, "Server-Bereinigung bleibt vorgemerkt")
+            // Löschantrag: Die Sitzung gilt weiter, der nächste Abgleich holt das Leeren nach.
+            rig.session = CloudSession("alice", true, deletionRequested = true, consentStatus = ConsentStatus.CURRENT)
             rig.serverDown = false
             rig.log.clear()
             push.sync()
             assertEquals(listOf("delete", "set:alice:fcm:null"), rig.log, "beim nächsten Abgleich nachgeholt")
             assertNull(rig.prefs.uploaded)
 
-            push.enable()
+            rig.session = CloudSession("alice", true, consentStatus = ConsentStatus.CURRENT)
+            push.sync()
             rig.serverDown = true
-            push.disable()
+            push.disable(signedOut = true)
             assertEquals("alice\nt3", rig.prefs.uploaded)
-            // Abmelden inzwischen erfolgt: Server-Token unerreichbar, lokales Token wird trotzdem verworfen.
+            // Abgemeldet: kein Server-Zugriff mehr; nach erneuter Anmeldung ersetzt das neue Token das alte.
             rig.session = null
+            rig.serverDown = false
             rig.log.clear()
             push.sync()
-            assertEquals(listOf("delete"), rig.log)
-            assertNull(rig.prefs.uploaded)
+            assertEquals(emptyList(), rig.log)
+            rig.session = CloudSession("alice", true, consentStatus = ConsentStatus.CURRENT)
+            push.sync()
+            assertEquals(listOf("token", "set:alice:fcm:t4"), rig.log)
+            assertEquals("alice\nt4", rig.prefs.uploaded)
         }
 
     @Test fun accountSwitchRotatesTheTokenBeforeUploading(): Unit =
@@ -149,28 +159,18 @@ class PushRegistrationTest {
             assertEquals(listOf("delete", "token", "set:bob:fcm:t2"), rig.log)
         }
 
-    @Test fun hintIsShownOnceUntilDismissed() {
-        val rig = Rig()
-        rig.registration().dismissHint()
-        assertFalse(rig.registration().hint.value)
-        rig.prefs.hintDone = false
-        rig.prefs.enabled = true
-        assertFalse(rig.registration().hint.value)
-    }
-
-    /** N10: Abmelden lässt Push aus, der Hinweis kommt nach erneuter Anmeldung wieder; Ausschalten blendet ihn aus. */
-    @Test fun signingOutKeepsPushOffButShowsTheHintAgain(): Unit =
+    /** Abmelden schaltet die Anzeige aus und leert das Token; Ausschalten allein lässt das Token stehen. */
+    @Test fun signingOutTurnsTheDisplayOffAndClearsTheToken(): Unit =
         runBlocking {
             val rig = Rig()
             val push = rig.registration()
             push.enable()
-            assertFalse(push.hint.value)
+            push.disable()
+            assertFalse(push.enabled.value)
+            assertEquals("alice\nt1", rig.prefs.uploaded)
             push.disable(signedOut = true)
             assertFalse(push.enabled.value)
-            assertTrue(push.hint.value)
-            assertTrue(rig.registration().hint.value, "übersteht den Neustart")
-            push.disable()
-            assertFalse(push.hint.value)
+            assertNull(rig.prefs.uploaded)
         }
 
     @Test fun parsesOnlyKnownVersionAndKindsAndValidIds() {

@@ -276,6 +276,12 @@ object LiveModel {
         )
     }
 
+    /** Hinweis für [match] mit dem Stand [state] (sofortige Haptik, bevor das neue [ActiveMatch] veröffentlicht ist). */
+    fun hint(
+        match: ActiveMatch,
+        state: MatchState,
+    ): ScoreHint? = LiveScoreRules.hint(snapshot(match.copy(state = state)))
+
     /** Sync-Anzeige: Zähler „synchron / N ausstehend“, Anzeige „Stand vor X s“. */
     fun syncUi(
         role: LiveRole,

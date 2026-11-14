@@ -33,8 +33,10 @@ import eu.advantly.presentation.match.LiveMatchSnapshot
 import eu.advantly.presentation.match.ScorerOption
 import eu.advantly.presentation.match.StartOptions
 import eu.advantly.presentation.match.WatchStatus
+import eu.advantly.presentation.push.NotificationPromptPort
 import eu.advantly.presentation.push.NotificationSettingsPort
 import eu.advantly.presentation.push.PushTarget
+import eu.advantly.presentation.push.notificationMoment
 import eu.advantly.presentation.stats.transfer
 import eu.advantly.presentation.support.SupportViewModel
 import eu.advantly.ui.phone.app.AdoptedHealthConsentDialog
@@ -68,6 +70,7 @@ import eu.advantly.ui.phone.friends.LiveHandoverButton
 import eu.advantly.ui.phone.friends.LiveVisitorsButton
 import eu.advantly.ui.phone.friends.MatchSharingSection
 import eu.advantly.ui.phone.friends.MatchVisitorsSection
+import eu.advantly.ui.phone.friends.NotificationPromptSheet
 import eu.advantly.ui.phone.friends.handoverCandidates
 import eu.advantly.ui.phone.history.HeadToHeadLinks
 import eu.advantly.ui.phone.history.HeadToHeadScreen
@@ -106,6 +109,7 @@ import org.jetbrains.compose.resources.stringResource
  * @param recoveryHold Recovery-Hold bzw. sein Dialog ist offen: der Konto-Fluss wartet, bis er entschieden ist
  * @param buildNumber `advantly.buildNumber` dieser App für „Was ist neu?“ (Plan 0.5.1 §6); `0` = nie zeigen (Preview)
  * @param notifications Push-Einstellung (nur Android mit Firebase); `null` blendet Profil-Abschnitt und Hinweis aus
+ * @param notificationPrompt Erklärseite zu Benachrichtigungen im passenden Moment (nur Android mit Firebase; iOS `null`)
  * @param pushTarget angetippte Benachrichtigung: öffnet den Freunde-Tab am Ziel, danach [onPushTargetHandled]
  */
 @OptIn(ExperimentalComposeUiApi::class)
@@ -132,6 +136,7 @@ fun AdvantlyApp(
     recoveryHold: Boolean = false,
     buildNumber: Int = 0,
     notifications: NotificationSettingsPort? = null,
+    notificationPrompt: NotificationPromptPort? = null,
     pushTarget: PushTarget? = null,
     onPushTargetHandled: () -> Unit = {},
 ) {
@@ -229,6 +234,21 @@ fun AdvantlyApp(
             ?.state
             ?.collectAsState()
             ?.value
+    // Erklärseite: erster passender Moment (Freunde, Anfragen, Live); die Port-Logik entscheidet, ob sie (noch einmal) kommt.
+    val momentReached = friendsState?.let(::notificationMoment) == true
+    LaunchedEffect(notificationPrompt, momentReached) { if (momentReached) notificationPrompt?.onMoment() }
+    // Nie über dem Zählen, einer anderen Vollbild-Ebene, „Was ist neu?“ oder einem offenen Dialog.
+    val showNotificationPrompt =
+        notificationPrompt?.prompt?.collectAsState()?.value == true &&
+            !accountRequired &&
+            !recoveryHold &&
+            navigator.top == null &&
+            !showWhatsNew &&
+            !model.healthDialogOpen &&
+            !healthToConfirm &&
+            model.pendingScorerChoice == null &&
+            model.pendingWatchTakeOver == null
+    BackHandler(enabled = showNotificationPrompt) { notificationPrompt?.later() }
     // Welcher Platz verknüpft ist, steht je Match im Setup (Pull); hier nur die Namen der Freunde.
     val friendAliases =
         remember(friendsState?.friends) {
@@ -251,7 +271,7 @@ fun AdvantlyApp(
             Box(modifier.fillMaxSize().background(AdvantlyTheme.colors.bg)) {
                 // Unter einer Vollbild-Ebene werden die Tabs nicht gezeichnet: nichts Verdecktes bleibt bedienbar
                 // oder für Screenreader erreichbar.
-                if ((navigator.top == null && !showWhatsNew) || accountRequired) {
+                if ((navigator.top == null && !showWhatsNew && !showNotificationPrompt) || accountRequired) {
                     Column(Modifier.fillMaxSize().safeContentPadding()) {
                         UpdateRequiredBanner(updateRequired)
                         Box(Modifier.weight(1f)) {
@@ -437,6 +457,7 @@ fun AdvantlyApp(
                     }
                 }
                 if (showWhatsNew) WhatsNewSheet(model, versionName, whatsNewPoints, watchInstall, onDone = seeWhatsNew)
+                if (showNotificationPrompt) notificationPrompt?.let { NotificationPromptSheet(it) }
                 if (!accountRequired) {
                     model.pendingScorerChoice?.let { ScorerDialog(model) }
                     model.pendingWatchTakeOver?.let { WatchTakeOverDialog(model, it.busy) }

@@ -12,6 +12,7 @@ import eu.advantly.core.scoring.ServeOutcome
 import eu.advantly.health.HealthSummary
 import eu.advantly.match.session.MatchSession
 import eu.advantly.match.session.ServerChoiceContext
+import eu.advantly.match.session.SessionTrace
 import eu.advantly.presentation.match.LocalDay
 import eu.advantly.wear.match.FormatChoice
 import eu.advantly.wear.match.PlayerSlot
@@ -30,13 +31,14 @@ class WatchController(
     today: () -> LocalDay,
     tapGuard: TapGuard = TapGuard(),
     liveHealth: (MatchId) -> HealthSummary? = { null },
+    trace: SessionTrace = SessionTrace.NONE,
     private val operationBoundary: (() -> Unit) -> Boolean = {
         it()
         true
     },
     private val disposeBoundary: () -> Unit = {},
 ) {
-    private val core = WatchControllerCore(session, directory, prefs, wallClock, elapsed, uptime, today, tapGuard, liveHealth)
+    private val core = WatchControllerCore(session, directory, prefs, wallClock, elapsed, uptime, today, tapGuard, liveHealth, trace)
     val state: StateFlow<WatchUiState> get() = core.state
     var effects: ((WatchEffect) -> Unit)?
         get() = core.effects

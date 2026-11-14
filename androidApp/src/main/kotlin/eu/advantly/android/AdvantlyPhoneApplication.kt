@@ -21,7 +21,7 @@ class AdvantlyPhoneApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // Push: Firebase nur mit Werten im Build und ohne Token vor der Einwilligung (Auto-Init aus).
+        // Push: Firebase nur mit Werten im Build; ein Token erst mit Konto (Auto-Init aus bis zum ersten Upload).
         AndroidPush.initialize(this)
         // Installationsprüfung (Kopie, quick_check) im Hintergrund; Session und Beobachter danach auf dem Main-Thread.
         AndroidInstallationGuard.checkAsync(this) { bootstrap() }

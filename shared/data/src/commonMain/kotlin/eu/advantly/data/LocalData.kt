@@ -74,10 +74,21 @@ class LocalData(
      * Invalidierung der Eingaben für kompakte Verzeichnisansichten, ohne Abfrage oder Event-Replay im Callback.
      * Favoriten und reine Session-/Sync-Statuswechsel lösen keine Invalidierung aus. Rückgabe entfernt die Registrierung.
      */
-    fun observeDirectoryChanges(onChanged: () -> Unit): () -> Unit {
+    fun observeDirectoryChanges(onChanged: () -> Unit): () -> Unit = observe(onChanged, headers = true)
+
+    /**
+     * Wie [observeDirectoryChanges], aber ohne Match-Köpfe: Spieler (Umbenennung, Self), Zuweisungen, Access, Redaktionen und
+     * Self-Aliase. Für Namens-Caches einer Live-Ansicht – der Kopf ändert sich mit jedem gezählten Punkt.
+     */
+    fun observeIdentityChanges(onChanged: () -> Unit): () -> Unit = observe(onChanged, headers = false)
+
+    private fun observe(
+        onChanged: () -> Unit,
+        headers: Boolean,
+    ): () -> Unit {
         val queries =
-            listOf(
-                database.matchHeaderQueries.observeHeaders(),
+            listOfNotNull(
+                database.matchHeaderQueries.observeHeaders().takeIf { headers },
                 database.replicaLifecycleQueries.observeAccess(),
                 database.replicaLifecycleQueries.observeEventRedactions(),
                 database.matchAssignmentQueries.forMatch(""),

@@ -722,6 +722,10 @@
     <string name="whats_new_19_2">Kommt das Netz während einer Synchronisierung zurück, lädt die App direkt nach – Freunde sehen deinen Live-Stand schneller.</string>
     <string name="whats_new_19_3">Deine Bilanz mit und gegen Freunde zählt jetzt über das Konto, auch in Matches deiner Freunde.</string>
     <string name="whats_new_19_4">Offene Freundes-Links und QR-Codes im Freunde-Tab gesammelt zurückziehen.</string>
+    <string name="whats_new_20_1">Freunde und Live-Matches sind jetzt sofort aktuell – ohne Warten oder Tab-Wechsel.</string>
+    <string name="whats_new_20_2">Benachrichtigungen: Beim ersten Freund fragt die App, ob du benachrichtigt werden möchtest. Ausschalten kannst du jederzeit im Profil.</string>
+    <string name="whats_new_20_3">Ein Match-Tiebreak erscheint im Feed und beim Zuschauen in Klammern.</string>
+    <string name="whats_new_20_4">Deine Uhr reagiert deutlich schneller auf Taps und vibriert, sobald der Punkt gespeichert ist – auch beim Übernehmen. Aktualisiere auch die App auf deiner Uhr.</string>
     <string name="device_repair">Uhren neu koppeln</string>
     <string name="device_repair_hint">Nutze das, wenn eine Uhr verloren ging oder ersetzt wurde. Jede Uhr muss die Kopplung danach auf der Uhr selbst neu bestätigen; ihre Daten bleiben.</string>
     <string name="device_repair_confirm_title">Alle Uhren neu koppeln?</string>
@@ -1036,10 +1040,15 @@
     <string name="live_back">Zurück</string>
     <string name="notifications_section">Benachrichtigungen</string>
     <string name="notifications_toggle">Push-Benachrichtigungen</string>
-    <string name="notifications_toggle_sub">Freundschaftsanfragen, Match-Einladungen und Bitten zu zählen. Namen ergänzt dein Handy; Google sieht nur IDs. Standardmäßig aus.</string>
+    <string name="notifications_toggle_sub">Benachrichtigungen anzeigen bei Freundschaftsanfragen, Match-Einladungen und Bitten zu zählen. Namen ergänzt dein Handy; Google sieht nur IDs.</string>
     <string name="notifications_hint">Benachrichtigen, wenn Freunde dich in ein Match eintragen oder zum Zuschauen oder Zählen einladen?</string>
     <string name="notifications_hint_enable">Einschalten</string>
     <string name="notifications_hint_later">Nicht jetzt</string>
+    <string name="notifications_prompt_title">Kein Match verpassen</string>
+    <string name="notifications_prompt_body">Erfahre sofort, wenn dich ein Freund in ein Match einträgt oder deine Einladung annimmt.</string>
+    <string name="notifications_prompt_more">Auch wenn dich jemand zum Zuschauen oder Zählen einlädt. Ausschalten kannst du jederzeit im Profil.</string>
+    <string name="notifications_prompt_enable">Benachrichtigungen einschalten</string>
+    <string name="notifications_prompt_later">Später</string>
     <!-- Cloud-Ansichten (0.6.3): unbenannte bzw. redigierte Plätze -->
     <string name="player_slot_n">Spieler %1$d</string>
     <string name="player_deleted">Gelöschter Spieler</string>
@@ -1100,4 +1109,5 @@
     <string name="guest_invite_share_text">Ich habe dich auf Advantly als „%1$s“ eingetragen. Öffne den Link, um deine Matches zu übernehmen (gültig bis %2$s): %3$s</string>
     <string name="guest_invite_open">Einladung offen bis %1$s</string>
     <string name="guest_invite_revoke">Einladung zurückziehen</string>
+    <string name="cloud_sync_checking_account">Konto wird geprüft…</string>
 </resources>

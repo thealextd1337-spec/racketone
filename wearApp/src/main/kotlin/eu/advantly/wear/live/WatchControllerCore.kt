@@ -8,10 +8,16 @@ import eu.advantly.core.model.Side
 import eu.advantly.core.model.Sport
 import eu.advantly.core.model.TelemetryVisibility
 import eu.advantly.core.scoring.Correction
+import eu.advantly.core.scoring.MatchState
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.NextSetKind
 import eu.advantly.core.scoring.PointDetailRules
+import eu.advantly.core.scoring.PointDetailSet
+import eu.advantly.core.scoring.PointWon
+import eu.advantly.core.scoring.ScoreEvent
+import eu.advantly.core.scoring.ScorerChanged
 import eu.advantly.core.scoring.ServeOutcome
+import eu.advantly.core.scoring.Undo
 import eu.advantly.data.assignments
 import eu.advantly.health.HealthSummary
 import eu.advantly.match.session.ActiveMatch
@@ -22,6 +28,8 @@ import eu.advantly.match.session.ServerChoiceContext
 import eu.advantly.match.session.ServerChoicePhase
 import eu.advantly.match.session.SessionListener
 import eu.advantly.match.session.SessionState
+import eu.advantly.match.session.SessionTrace
+import eu.advantly.match.session.section
 import eu.advantly.presentation.live.HapticCue
 import eu.advantly.presentation.live.LiveScoreRules
 import eu.advantly.presentation.live.ScoreHint
@@ -63,6 +71,7 @@ internal class WatchControllerCore(
     private val today: () -> LocalDay,
     private val tapGuard: TapGuard = TapGuard(),
     private val liveHealth: (MatchId) -> HealthSummary? = { null },
+    private val trace: SessionTrace = SessionTrace.NONE,
 ) {
     /** Entwurf des Kurz-Wizards; `null` = nicht im Wizard. */
     private data class Draft(
@@ -126,12 +135,38 @@ internal class WatchControllerCore(
     /** Empfänger einmaliger Effekte (Activity: Vibrator, Toast). */
     var effects: ((WatchEffect) -> Unit)? = null
 
-    private val listener = SessionListener { onSession(it) }
+    private val listener =
+        object : SessionListener {
+            override fun onStateChanged(state: SessionState) = onSession(state)
+
+            override fun onOwnEventCommitted(
+                event: ScoreEvent,
+                state: MatchState,
+            ) = onCommitted(event, state)
+        }
+
+    /**
+     * Paket 5 (Haptik < 100 ms): Rückmeldung des laufenden Kommandos. Kommt mit dem ersten passenden eigenen Event direkt
+     * nach dessen Commit (Session-Hook), vor Kopf, Versand und UI-Modell – nie optimistisch vor dem Speichern.
+     */
+    private var pendingHaptic: ((ScoreEvent, MatchState) -> WatchEffect.Haptic?)? = null
+
+    /** > 0, solange ein Kommando läuft: Session-Meldungen bauen die UI dann nicht einzeln neu, sondern einmal am Ende. */
+    private var commandDepth = 0
+    private var publishPending = false
+
+    /** Identitäts-Snapshot (Namen, „Du“) des offenen Matches; [identityKey] und Signale aus Data entscheiden über Neuladen. */
+    private var identityKey: List<Any?>? = null
+    private var identityDirty = true
+    private val names = HashMap<PlayerId, String?>()
+    private val selfIds = HashMap<PlayerId, Boolean>()
+    private var removeIdentityObserver: (() -> Unit)? = null
 
     /** Meldet sich bei der Session an (liefert sofort den aktuellen Zustand). Idempotent. */
     fun start() {
         if (started) return
         started = true
+        removeIdentityObserver = session.data.observeIdentityChanges { identityDirty = true }
         session.addListener(listener)
     }
 
@@ -139,22 +174,26 @@ internal class WatchControllerCore(
         if (!started) return
         started = false
         session.removeListener(listener)
+        removeIdentityObserver?.invoke()
+        removeIdentityObserver = null
     }
 
     /** Sekundentakt der UI (Staleness, Übernahme-Angebot nach 30 s, Ende der Aufschlag-Leiste). */
-    fun tick() {
-        settleServeBar(elapsed())
-        publish()
-    }
+    fun tick() =
+        command {
+            settleServeBar(elapsed())
+            publish()
+        }
 
     /** Display wieder aktiv (Ambient → interaktiv): kurze Sperre gegen den Aufweck-Tap (04 §4.3.3 Punkt 4). */
-    fun onWake() {
-        interactive = true
-        tapGuard.onWake(uptime())
-        // Leiste gehört zum Moment direkt nach dem Punkt – nach dem Ambient-Modus ist der vorbei (ohne Eingabe beendet)
-        settleServeBar(Long.MAX_VALUE)
-        publish()
-    }
+    fun onWake() =
+        command {
+            interactive = true
+            tapGuard.onWake(uptime())
+            // Leiste gehört zum Moment direkt nach dem Punkt – nach dem Ambient-Modus ist der vorbei (ohne Eingabe beendet)
+            settleServeBar(Long.MAX_VALUE)
+            publish()
+        }
 
     // --- Startliste -------------------------------------------------------------------------------
 
@@ -318,18 +357,30 @@ internal class WatchControllerCore(
         if (!live.status.isRunning) return false
         if (!tapGuard.tryAccept(uptime())) return false
         val before = live.hint
-        if (!session.recordPoint(side)) {
-            emit(WatchEffect.Haptic(WatchHaptic.REJECTED))
-            return false
+        val match = session.state.value.match ?: return false
+        return trace.section("accepted") {
+            val recorded =
+                withHaptic({ event, after ->
+                    if (event.payload is PointWon) {
+                        val hint = LiveModel.hint(match, after)
+                        val attention = hint != null && hint.kind in ATTENTION_HINTS && hint != before
+                        WatchEffect.Haptic(hapticFor(LiveScoreRules.cueFor(after, side)), attention)
+                    } else {
+                        null
+                    }
+                }) {
+                    session.recordPoint(side).also { recorded ->
+                        // Aufschlag-Leiste für genau diesen Punkt (ersetzt die des vorigen Punktes)
+                        session.state.value.match
+                            ?.takeIf { recorded && it.serveInfoEnabled }
+                            ?.lastPoint
+                            ?.let { serveBar.onPoint(it.id, elapsed()) }
+                        publish()
+                    }
+                }
+            if (!recorded) emit(WatchEffect.Haptic(WatchHaptic.REJECTED))
+            recorded
         }
-        val after = session.state.value.match ?: return true
-        // Aufschlag-Leiste für genau diesen Punkt (ersetzt die des vorigen Punktes)
-        after.lastPoint?.takeIf { after.serveInfoEnabled }?.let { serveBar.onPoint(it.id, elapsed()) }
-        publish()
-        val hint = mutableState.value.live?.hint
-        val attention = hint != null && hint.kind in ATTENTION_HINTS && hint != before
-        emit(WatchEffect.Haptic(hapticFor(LiveScoreRules.cueFor(after.state, side)), attention))
-        return true
     }
 
     /**
@@ -350,12 +401,10 @@ internal class WatchControllerCore(
             return false
         }
         serveBar.dismiss()
-        if (!session.removeLastPointOf(side)) {
-            publish()
+        if (!withHaptic(UNDO_HAPTIC) { session.removeLastPointOf(side).also { publish() } }) {
             emit(WatchEffect.Haptic(WatchHaptic.REJECTED))
             return false
         }
-        emit(WatchEffect.Haptic(WatchHaptic.UNDO))
         emit(WatchEffect.Toast(WatchToast.PointRemoved(side)))
         return true
     }
@@ -377,12 +426,14 @@ internal class WatchControllerCore(
             } else {
                 outcome
             }
-        if (!session.setServeInfo(bar.pointId, value)) {
+        val chosen =
+            withHaptic({ event, _ -> if (event.payload is PointDetailSet) WatchEffect.Haptic(WatchHaptic.CONFIRM) else null }) {
+                session.setServeInfo(bar.pointId, value).also { if (it) serveBar.onChosen(elapsed()) }
+            }
+        if (!chosen) {
             emit(WatchEffect.Haptic(WatchHaptic.REJECTED))
             return false
         }
-        serveBar.onChosen(elapsed())
-        emit(WatchEffect.Haptic(WatchHaptic.CONFIRM))
         publish()
         return true
     }
@@ -431,14 +482,13 @@ internal class WatchControllerCore(
             session.state.value.match
                 ?.state ?: return false
         serveBar.dismiss()
-        if (!session.undo()) {
+        if (!withHaptic(UNDO_HAPTIC) { session.undo() }) {
             emit(WatchEffect.Toast(WatchToast.NothingToUndo))
             return false
         }
         val after =
             session.state.value.match
                 ?.state ?: return true
-        emit(WatchEffect.Haptic(WatchHaptic.UNDO))
         emit(WatchEffect.Toast(WatchToast.Undone(LiveModel.scoreText(before), LiveModel.scoreText(after))))
         return true
     }
@@ -446,7 +496,7 @@ internal class WatchControllerCore(
     /** Wiederholen – auch „Rückgängig“ nach „Punkt abziehen“ (gleicher Redo-Stapel, W2-Vertrag §1). */
     fun redo(): Boolean {
         if (mutableState.value.live?.let { it.isScorer && it.overlay == null } != true || locked || !interactive) return false
-        if (!session.redo()) return false
+        if (!command { session.redo() }) return false
         emit(WatchEffect.Toast(WatchToast.Redone))
         return true
     }
@@ -540,9 +590,10 @@ internal class WatchControllerCore(
     /** Bestätigte Übernahme: repliziertes `ScorerChanged`; erst das angewandte Event schaltet die Eingaben frei. */
     fun confirmTakeOver(): Boolean {
         overlay = null
-        val taken = session.takeOverScoring()
-        publish()
-        return taken
+        // Bestätigung erst, wenn das ScorerChanged gespeichert ist (wie beim Punkt)
+        return withHaptic({ event, _ -> if (event.payload is ScorerChanged) WatchEffect.Haptic(WatchHaptic.CONFIRM) else null }) {
+            session.takeOverScoring().also { publish() }
+        }
     }
 
     fun dismissOverlay() {
@@ -684,6 +735,15 @@ internal class WatchControllerCore(
     }
 
     private fun publish() {
+        if (commandDepth > 0) {
+            publishPending = true
+            return
+        }
+        publishPending = false
+        trace.section("feedbackState") { publishNow() }
+    }
+
+    private fun publishNow() {
         updateServerChoice()
         val next = WatchUiState(screen())
         // PLAN F15: einmal je Ausfall vibrieren, wenn das Übernahme-Angebot erscheint. Ohne Empfänger (App im
@@ -738,13 +798,14 @@ internal class WatchControllerCore(
         val sessionState = session.state.value
         val match = sessionState.match
         if (match != null) {
+            refreshIdentities(sessionState, match)
             return WatchScreen.Live(
                 LiveModel
                     .build(
                         match = match,
                         sync = sessionState.sync,
-                        names = ::nameOf,
-                        isSelf = directory::isSelf,
+                        names = { id -> cached(names, id, ::nameOf) },
+                        isSelf = { id -> cached(selfIds, id, directory::isSelf) },
                         contactAgoMs = lastContactAt?.let { elapsed() - it },
                         disconnectedForMs = disconnectedSince?.let { elapsed() - it },
                         locked = locked,
@@ -828,6 +889,33 @@ internal class WatchControllerCore(
         )
     }
 
+    /**
+     * Namen und „Du“ ändern sich nicht mit dem Spielstand: neu laden nur bei Match- oder Lineup-Wechsel, Access/Redaktion
+     * (`lifecycleRevision`), Daten- bzw. Kontowechsel (`dataRevision`) und Signalen aus Data zu Spielern, Zuweisungen und
+     * Aliasen ([eu.advantly.data.LocalData.observeIdentityChanges]). Nur Anzeige – nie Grundlage für Schreibrechte.
+     */
+    private fun refreshIdentities(
+        state: SessionState,
+        match: ActiveMatch,
+    ) {
+        val key = listOf(match.id, match.lineup, state.dataRevision, state.lifecycleRevision)
+        if (!identityDirty && key == identityKey) return
+        identityKey = key
+        identityDirty = false
+        names.clear()
+        selfIds.clear()
+    }
+
+    private fun <V> cached(
+        cache: HashMap<PlayerId, V>,
+        id: PlayerId,
+        load: (PlayerId) -> V,
+    ): V {
+        @Suppress("UNCHECKED_CAST")
+        if (id in cache) return cache[id] as V
+        return load(id).also { cache[id] = it }
+    }
+
     /** Per Spieler-ID; eine redigierte Zuweisung ("") ist kein Name und fällt nicht auf das Verzeichnis zurück. */
     private fun nameOf(id: PlayerId): String? =
         (
@@ -840,8 +928,44 @@ internal class WatchControllerCore(
         effects?.invoke(effect)
     }
 
+    private fun onCommitted(
+        event: ScoreEvent,
+        state: MatchState,
+    ) {
+        val haptic = pendingHaptic?.invoke(event, state) ?: return
+        pendingHaptic = null
+        trace.section("haptic") { emit(haptic) }
+    }
+
+    /** Ein Kommando baut die UI höchstens einmal neu (ein Publish je Tap), egal wie oft die Session dazwischen meldet. */
+    private inline fun <T> command(block: () -> T): T {
+        commandDepth++
+        try {
+            return block()
+        } finally {
+            commandDepth--
+            if (commandDepth == 0 && publishPending) publish()
+        }
+    }
+
+    /** [block] als [command]; [haptic] wählt das Event, nach dessen Commit sofort vibriert wird. */
+    private fun <T> withHaptic(
+        haptic: (ScoreEvent, MatchState) -> WatchEffect.Haptic?,
+        block: () -> T,
+    ): T =
+        command {
+            pendingHaptic = haptic
+            try {
+                block()
+            } finally {
+                pendingHaptic = null
+            }
+        }
+
     private companion object {
         val ATTENTION_HINTS = setOf(ScoreHint.Kind.MatchPoint, ScoreHint.Kind.SetPoint, ScoreHint.Kind.BreakPoint)
+        val UNDO_HAPTIC: (ScoreEvent, MatchState) -> WatchEffect.Haptic? =
+            { event, _ -> if (event.payload is Undo) WatchEffect.Haptic(WatchHaptic.UNDO) else null }
 
         fun hapticFor(cue: HapticCue): WatchHaptic =
             when (cue) {

@@ -262,6 +262,7 @@ class MainActivity : ComponentActivity() {
                 watchInstall = watchInstall,
                 recoveryHold = !installation.privateTransportAllowed || recoveryNotice.value,
                 notifications = notifications,
+                notificationPrompt = notifications,
                 pushTarget = pushTarget.value,
                 onPushTargetHandled = { pushTarget.value = null },
                 supportModel = support,
@@ -291,6 +292,8 @@ class MainActivity : ComponentActivity() {
                 override fun onStart(owner: LifecycleOwner) {
                     // Live-Übertragung: Ein im Hintergrund verbotener Dienststart gelingt jetzt.
                     LiveRelayService.onForeground(applicationContext)
+                    // Benachrichtigungen evtl. in den Systemeinstellungen geändert: Schalter und Hinweis neu auswerten.
+                    this@MainActivity.notifications?.refresh()
                     foreground(this@MainActivity)
                 }
             },

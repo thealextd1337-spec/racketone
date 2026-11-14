@@ -834,7 +834,8 @@ class PhoneSyncCoordinatorTest {
 
     /**
      * Ändern sich lokale Daten während des Uploads (z. B. Matchende), folgt genau ein Lauf, nie eine Kette. Weitere
-     * Auslöser während eines Laufs schließen sich ihm an; der Vordergrund-Auslöser ist gedrosselt.
+     * Auslöser während eines Laufs schließen sich ihm an (nach Beginn des Downloads mit einem gemeinsamen Folgelauf); der
+     * Vordergrund-Auslöser ist gedrosselt.
      */
     @Test fun changesDuringTheUploadGetOneFollowUpTriggersJoinTheRunningCycleAndForegroundIsThrottled() =
         runBlocking {
@@ -879,7 +880,7 @@ class PhoneSyncCoordinatorTest {
                 hold.release.complete(Unit)
                 withTimeout(15_000) { running.join() }
                 withTimeout(15_000) { while (f.sync.state.value.running) yield() }
-                assertEquals(4, f.count("start:cloud_sync_pull_v1"))
+                assertEquals("ein gemeinsamer Folgelauf", 5, f.count("start:cloud_sync_pull_v1"))
                 assertEquals("Auslöser während des Laufs: kein eigenes Ende", 3, f.runsEnded)
                 assertSerial(f.trace)
 
@@ -889,7 +890,60 @@ class PhoneSyncCoordinatorTest {
                 f.sync.onForeground()
                 assertTrue(f.sync.state.value.running)
                 withTimeout(15_000) { while (f.sync.state.value.running) yield() }
-                assertEquals(5, f.count("start:cloud_sync_pull_v1"))
+                assertEquals(6, f.count("start:cloud_sync_pull_v1"))
+            } finally {
+                f.close()
+            }
+        }
+
+    /**
+     * W12-Befund „Freund angenommen erst nach ~3 min“: Ein Push während des Downloads (der Server-Stand entstand womöglich
+     * nach dessen Abfrage) ging im laufenden Lauf auf. Jetzt folgt genau ein zusammengefasster Folgelauf, ohne Kette.
+     */
+    @Test fun triggersAfterTheDownloadBeganGetExactlyOneCombinedFollowUp() =
+        runBlocking {
+            val f = Fixture(this)
+            try {
+                f.signIn()
+                f.firstCycle()
+                val hold = Hold()
+                f.holdPull = hold
+                val running = checkNotNull(f.sync.request(null))
+                withTimeout(15_000) { hold.entered.await() }
+                assertSame(running, f.sync.request("alice"))
+                assertSame(running, f.sync.request(null))
+                f.sync.syncNow()
+                f.holdPull = null
+                hold.release.complete(Unit)
+                withTimeout(15_000) { running.join() }
+                withTimeout(15_000) { while (f.sync.state.value.running) yield() }
+                delay(200)
+                assertEquals("erster Lauf, Lauf, ein Folgelauf für drei Anstöße", 3, f.count("start:cloud_sync_pull_v1"))
+                assertEquals("der Folgelauf zählt zu seinem Lauf", 2, f.runsEnded)
+                assertSerial(f.trace)
+            } finally {
+                f.close()
+            }
+        }
+
+    /** Ein schon laufender Fremd-Download (Freunde-Tab) begann vor dem Anstoß: der Lauf lädt danach selbst. */
+    @Test fun aDownloadAlreadyRunningBeforeTheTriggerDoesNotCount() =
+        runBlocking {
+            val f = Fixture(this)
+            try {
+                f.signIn()
+                f.firstCycle()
+                val hold = Hold()
+                f.holdPull = hold
+                f.pull.pullNow()
+                withTimeout(15_000) { hold.entered.await() }
+                val job = checkNotNull(f.sync.request("alice"))
+                f.holdPull = null
+                hold.release.complete(Unit)
+                withTimeout(15_000) { job.join() }
+                withTimeout(15_000) { while (f.sync.state.value.running) yield() }
+                assertEquals("erster Lauf, Fremd-Download, eigener Download", 3, f.count("start:cloud_sync_pull_v1"))
+                assertSerial(f.trace)
             } finally {
                 f.close()
             }

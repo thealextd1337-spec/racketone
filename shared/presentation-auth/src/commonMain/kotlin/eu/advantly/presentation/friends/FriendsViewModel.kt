@@ -10,6 +10,8 @@ import eu.advantly.cloud.sync.FriendRequestResult
 import eu.advantly.cloud.sync.FriendsPort
 import eu.advantly.cloud.sync.GuestLinksPort
 import eu.advantly.cloud.sync.LiveMatchesPort
+import eu.advantly.cloud.sync.LiveSignal
+import eu.advantly.cloud.sync.LiveSignalsPort
 import eu.advantly.cloud.sync.PulledFriendship
 import eu.advantly.cloud.sync.PulledMatch
 import eu.advantly.cloud.sync.SharedMatchesPort
@@ -20,10 +22,15 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+
+/** Live-Signale (Plan W12 Paket 3): Signale innerhalb dieser Zeit lösen eine einzige Abfrage aus. */
+internal const val LIVE_SIGNAL_BUNDLE_MS = 300L
 
 /** Warum der Freunde-Tab (noch) nicht nutzbar ist; Offline-Zählen bleibt in jedem Fall unberührt. */
 enum class FriendsAccess { SIGNED_OUT, SETUP_REQUIRED, CONSENT_REQUIRED, PAUSED, READY }
@@ -76,6 +83,8 @@ data class FriendsState(
     val live: List<LiveEntry>? = null,
     /** Fehler beim letzten Laden von [live]; die zuletzt geladene Liste bleibt stehen. */
     val liveError: String? = null,
+    /** Live-Signalkanal steht ([FriendsViewModel.followLive]): Polling nur noch als seltener Rückfall. */
+    val liveRealtime: Boolean = false,
     /** Laufende Abgaben eigener Matches (Match-ID → Stand), plan-live-mitspieler §3.4. */
     val handovers: Map<String, HandoverStatus> = emptyMap(),
     /** Fehler der letzten Übergabe-Aktion (Einladen, Annehmen, Ablehnen, Übernehmen). */
@@ -111,6 +120,8 @@ class FriendsViewModel(
     private val scorers: ScorerHandovers? = null,
     /** Gast mit Freund verknüpfen (plan-0.6.3 §3.5); ohne Port bleibt es aus. */
     private val guests: GuestLinksPort? = null,
+    /** Live-Signale per Realtime (Plan W12 Paket 3); ohne Port bleibt es beim Polling (iOS). */
+    private val liveSignals: LiveSignalsPort? = null,
 ) {
     private val scope = CoroutineScope(parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]))
     private val mutable = MutableStateFlow(FriendsState())
@@ -135,6 +146,10 @@ class FriendsViewModel(
     private var visitorMatch: String? = null
     private var watchingRevision = 0L
     private var liveLoad: Job? = null
+
+    /** Offene [followLive]-Aufrufe und das gemeinsame Kanal-Abo der aktuellen Sitzung. */
+    private var liveFollowers = 0
+    private var liveFollow: Job? = null
 
     private class Stale : Exception()
 
@@ -455,6 +470,68 @@ class FriendsViewModel(
         return liveLoad
     }
 
+    /**
+     * Live-Signale verfolgen, solange der zurückgegebene Job läuft (die UI bricht ihn beim Pausieren ab). Alle Aufrufer
+     * teilen ein Abo; es läuft nur bei READY und startet nach einem Sitzungswechsel für das neue Konto neu. Beitritt lädt
+     * sofort (verpasste Änderungen), weitere Signale werden [LIVE_SIGNAL_BUNDLE_MS] lang gebündelt. `null` ohne Port.
+     */
+    fun followLive(): Job? {
+        if (liveSignals == null || liveMatches == null) return null
+        liveFollowers++
+        startFollow()
+        // invokeOnCompletion statt finally: zählt auch einen Abbruch, bevor der Job überhaupt lief.
+        return scope.launch { awaitCancellation() }.apply {
+            invokeOnCompletion { if (--liveFollowers == 0) stopFollow() }
+        }
+    }
+
+    private fun startFollow() {
+        val signals = liveSignals ?: return
+        if (liveFollowers == 0 || liveFollow?.isActive == true) return
+        val profile = readyProfile() ?: return
+        liveFollow =
+            scope.launch {
+                var bundle: Job? = null
+                try {
+                    signals.signals(profile).collect { signal ->
+                        when (signal) {
+                            LiveSignal.SUBSCRIBED -> {
+                                show { copy(liveRealtime = true) }
+                                bundle?.cancel()
+                                bundle = reloadLive(0)
+                            }
+
+                            LiveSignal.CHANGED -> {
+                                if (bundle?.isActive != true) bundle = reloadLive(LIVE_SIGNAL_BUNDLE_MS)
+                            }
+
+                            LiveSignal.LOST -> {
+                                show { copy(liveRealtime = false) }
+                            }
+                        }
+                    }
+                } finally {
+                    bundle?.cancel()
+                }
+                // Kanal endete von selbst (SDK-Fehler): Polling wie ohne Realtime.
+                show { copy(liveRealtime = false) }
+            }
+    }
+
+    private fun stopFollow() {
+        liveFollow?.cancel()
+        liveFollow = null
+        if (mutable.value.liveRealtime) show { copy(liveRealtime = false) }
+    }
+
+    /** Nach [delayMs] neu laden; eine laufende Abfrage begann womöglich vor der Änderung, also danach erneut. */
+    private fun CoroutineScope.reloadLive(delayMs: Long): Job =
+        launch {
+            delay(delayMs)
+            liveLoad?.takeIf { it.isActive }?.join()
+            loadLive()
+        }
+
     /** `true`: Zählen weitergeben gibt es hier (Konto-Host mit Session). */
     val hasHandover: Boolean get() = scorers != null
 
@@ -668,6 +745,8 @@ class FriendsViewModel(
             action = null
             liveLoad?.cancel()
             liveLoad = null
+            liveFollow?.cancel()
+            liveFollow = null
             overlay.clear()
             shareOverlay.clear()
             goneMatches.clear()
@@ -680,6 +759,7 @@ class FriendsViewModel(
         }
         shown = session
         reloadLocal()
+        startFollow()
         // Neues Konto mit offener Zuschauer-Verwaltung: dessen Liste laden.
         if (!same && visitorMatch != null) loadVisitors()
     }

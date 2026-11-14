@@ -51,6 +51,7 @@ import eu.advantly.ui.phone.resources.cloud_sync_blocked_permission
 import eu.advantly.ui.phone.resources.cloud_sync_blocked_rejected
 import eu.advantly.ui.phone.resources.cloud_sync_blocked_suspended
 import eu.advantly.ui.phone.resources.cloud_sync_blocked_waiting
+import eu.advantly.ui.phone.resources.cloud_sync_checking_account
 import eu.advantly.ui.phone.resources.cloud_sync_confirm_terms
 import eu.advantly.ui.phone.resources.cloud_sync_connection_failed
 import eu.advantly.ui.phone.resources.cloud_sync_consent
@@ -124,8 +125,14 @@ internal fun backupStatus(
             blockText(blocked) to BackupAction.RETRY
         }
 
-        auth.unconfirmed || sync?.status == PhoneSyncStatus.CONNECTION_FAILED -> {
+        sync?.status == PhoneSyncStatus.CONNECTION_FAILED ||
+            (auth.unconfirmed && auth.error in setOf("connection_failed", "cloud_connection_failed")) -> {
             Res.string.cloud_sync_connection_failed to BackupAction.RETRY
+        }
+
+        // Prüfung läuft noch oder scheiterte ohne Netzfehler (z. B. Token vor der Erneuerung, Rate-Limit).
+        auth.unconfirmed -> {
+            Res.string.cloud_sync_checking_account to BackupAction.RETRY
         }
 
         sync?.status == PhoneSyncStatus.FAILED -> {
@@ -184,9 +191,11 @@ fun BackupStatusLine(model: AuthViewModel) {
         action?.let {
             TextButton(
                 {
-                    // Ohne Cloud-Kontext erst das Konto prüfen; danach startet der Koordinator selbst.
+                    // Ohne Cloud-Kontext oder bei unbestätigtem Konto erst das Konto prüfen; danach startet der Koordinator selbst.
                     val port = model.sync
-                    if (it == BackupAction.RETRY && port != null && sync?.available == true) port.syncNow() else model.refresh()
+                    val syncs = it == BackupAction.RETRY && port != null && sync?.available == true
+                    if (!syncs || auth.unconfirmed) model.refresh()
+                    if (syncs) port.syncNow()
                 },
                 enabled = !auth.busy,
                 modifier = Modifier.testTag("backup_action"),

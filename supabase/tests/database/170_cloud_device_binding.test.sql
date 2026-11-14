@@ -212,8 +212,12 @@ select ok(exists(select 1 from realtime.messages where topic='cloud-binding-sent
   'Positivkontrolle: Realtime enthält tatsächlich eine Nachricht');
 select ok((select relrowsecurity from pg_class where oid='realtime.messages'::regclass),
   'Realtime-RLS tatsächlich aktiv');
+-- 20261114000300 öffnet nur Lesen auf live:<eigenes Konto> (540); alle anderen Themen und Schreiben bleiben zu.
 select ok(exists(select 1 from pg_policies where schemaname='realtime' and tablename='messages'
   and policyname='cloud_realtime_closed' and permissive='RESTRICTIVE' and cmd='ALL'
+  and qual like '%can_receive_realtime%' and with_check='false')
+  and exists(select 1 from pg_policies where schemaname='realtime' and tablename='messages'
+  and policyname='cloud_realtime_closed_anon' and permissive='RESTRICTIVE' and cmd='ALL'
   and qual='false' and with_check='false'),'Restriktive Realtime-Sperre gilt für alle Operationen');
 select pg_temp.identify(4,2);
 select ok(not private.can_receive_realtime('match:17300000-0000-4000-8000-000000000001:1'),'Match-Broadcast geschlossen');

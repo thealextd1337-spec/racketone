@@ -123,9 +123,9 @@ export function fcm(
           Authorization: `Bearer ${await accessToken()}`,
           "Content-Type": "application/json",
         },
-        // Nur data: Text baut die App lokal; hohe Priorität für Doze, Verfall nach einer Stunde.
+        // Nur data: Text baut die App lokal.
         body: JSON.stringify({
-          message: { token, data, android: { priority: "high", ttl: "3600s" } },
+          message: { token, data, android: android(data) },
         }),
       });
       if (response.ok) {
@@ -139,6 +139,17 @@ export function fcm(
     } catch {
       return "error";
     }
+  };
+}
+
+// Zählen weitergeben ist zeitkritisch (Übergabe am Platz, Doze): hohe Priorität; alles andere stößt nur den Abgleich
+// an. Verfall nach einer Stunde; neuere Nachrichten derselben Art und desselben Bezugs ersetzen ältere wartende.
+const URGENT = new Set(["scorer_invited", "scorer_responded"]);
+export function android(data: Record<string, string>) {
+  return {
+    priority: URGENT.has(data.kind) ? "high" : "normal",
+    ttl: "3600s",
+    collapse_key: `${data.kind}:${data.matchId ?? data.profileId ?? "-"}`,
   };
 }
 

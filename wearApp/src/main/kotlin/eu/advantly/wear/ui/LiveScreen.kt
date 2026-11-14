@@ -85,8 +85,10 @@ import eu.advantly.core.model.Side
 import eu.advantly.core.scoring.MatchStatus
 import eu.advantly.core.scoring.SidePair
 import eu.advantly.match.session.OperationTimings
+import eu.advantly.match.session.section
 import eu.advantly.presentation.live.ScoreHint
 import eu.advantly.wear.R
+import eu.advantly.wear.diagnostics.AndroidTrace
 import eu.advantly.wear.live.CourtLetter
 import eu.advantly.wear.live.LiveModel
 import eu.advantly.wear.live.LiveOverlay
@@ -359,56 +361,59 @@ private fun ScorePage(
                                 hold = null // Loslassen/Abbruch: Anzeige läuft kurz zurück
                             }
                             if (multiTouch || held) return@awaitEachGesture // Handballen/Mehrfinger ignorieren; Halten erledigt
-                            val gesture =
-                                GestureClassifier.classify(
-                                    dx = last.x - down.position.x,
-                                    dy = last.y - down.position.y,
-                                    durationMillis = endTime - down.uptimeMillis,
-                                    touchSlopPx = touchSlop,
-                                    swipeThresholdPx = swipeThreshold,
-                                    maxTravelPx = maxTravel,
-                                )
-                            val decision =
-                                TouchRouting.decide(
-                                    target = target,
-                                    gesture = gesture,
-                                    stripNow = currentStrip,
-                                    locked = currentLive.locked,
-                                    scorer = currentLive.role == LiveRole.SCORER,
-                                )
-                            val half = TapZones.classify(down.position.y, size.height.toFloat())
-                            when (decision) {
-                                TouchDecision.Point -> {
-                                    if (half != null && currentActions.point(half)) {
-                                        flashSide = half
-                                        flashKey++
+                            // Paket 5: Loslassen → Haptik/Anzeige in Perfetto messbar (bis Ende der Tap-Behandlung)
+                            AndroidTrace.section("inputUp") {
+                                val gesture =
+                                    GestureClassifier.classify(
+                                        dx = last.x - down.position.x,
+                                        dy = last.y - down.position.y,
+                                        durationMillis = endTime - down.uptimeMillis,
+                                        touchSlopPx = touchSlop,
+                                        swipeThresholdPx = swipeThreshold,
+                                        maxTravelPx = maxTravel,
+                                    )
+                                val decision =
+                                    TouchRouting.decide(
+                                        target = target,
+                                        gesture = gesture,
+                                        stripNow = currentStrip,
+                                        locked = currentLive.locked,
+                                        scorer = currentLive.role == LiveRole.SCORER,
+                                    )
+                                val half = TapZones.classify(down.position.y, size.height.toFloat())
+                                when (decision) {
+                                    TouchDecision.Point -> {
+                                        if (half != null && currentActions.point(half)) {
+                                            flashSide = half
+                                            flashKey++
+                                        }
                                     }
-                                }
 
-                                // Halten ohne Abzugsmöglichkeit (sonst löst der Fortschritt schon beim Halten aus):
-                                // Controller meldet „nichts abzuziehen“
-                                TouchDecision.RemovePoint -> {
-                                    half?.let { currentActions.removePoint(it) }
-                                }
+                                    // Halten ohne Abzugsmöglichkeit (sonst löst der Fortschritt schon beim Halten aus):
+                                    // Controller meldet „nichts abzuziehen“
+                                    TouchDecision.RemovePoint -> {
+                                        half?.let { currentActions.removePoint(it) }
+                                    }
 
-                                TouchDecision.Unlock -> {
-                                    currentActions.unlock()
-                                }
+                                    TouchDecision.Unlock -> {
+                                        currentActions.unlock()
+                                    }
 
-                                TouchDecision.Undo -> {
-                                    currentActions.undo()
-                                }
+                                    TouchDecision.Undo -> {
+                                        currentActions.undo()
+                                    }
 
-                                TouchDecision.OpenControls -> {
-                                    currentOpenControls()
-                                }
+                                    TouchDecision.OpenControls -> {
+                                        currentOpenControls()
+                                    }
 
-                                is TouchDecision.Strip -> {
-                                    onStripTap(decision.action, down.position.x, down.position.y, serveGeometry, currentActions)
-                                }
+                                    is TouchDecision.Strip -> {
+                                        onStripTap(decision.action, down.position.x, down.position.y, serveGeometry, currentActions)
+                                    }
 
-                                TouchDecision.None -> {
-                                    Unit
+                                    TouchDecision.None -> {
+                                        Unit
+                                    }
                                 }
                             }
                         }
