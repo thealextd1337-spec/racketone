@@ -1,6 +1,7 @@
 package eu.advantly.android.push
 
 import android.Manifest
+import android.app.ActivityManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -16,6 +17,7 @@ import eu.advantly.android.AdvantlyPhoneApplication
 import eu.advantly.android.BuildConfig
 import eu.advantly.android.MainActivity
 import eu.advantly.android.R
+import eu.advantly.android.auth.PhoneAccountCore
 import eu.advantly.android.sync.AndroidPhoneSyncRecord
 import eu.advantly.android.sync.AndroidPhoneSyncScheduler
 import eu.advantly.cloud.sync.pulledFriendships
@@ -65,7 +67,7 @@ internal object AndroidPush {
     }
 }
 
-/** Nicht im Backup (`backup_rules`): Zustimmung und Token gehören zu diesem Gerät. */
+/** Nicht im Backup (`backup_rules`): Anzeige-Wunsch und Token gehören zu diesem Gerät. */
 internal class AndroidPushPreferences(
     context: Context,
 ) : PushPreferences {
@@ -85,7 +87,7 @@ internal class AndroidPushPreferences(
     }
 }
 
-/** Auto-Init folgt der Zustimmung: an mit dem ersten Token (Erneuerung über onNewToken), aus beim Löschen. */
+/** Auto-Init folgt dem Konto: an mit dem ersten Token (Erneuerung über onNewToken), aus beim Löschen (Abmelden). */
 internal object FirebaseTokens : PushTokenSource {
     override suspend fun token(): String {
         val messaging = FirebaseMessaging.getInstance()
@@ -198,22 +200,45 @@ internal fun showPush(
 }
 
 /**
- * Main-Thread nach der Installationsprüfung: Alias des Auslösers aus dem lokalen Freundes-Cache, Benachrichtigung,
- * danach ein Abgleich (neue Anfrage, Match, Rolle). Ausgeschaltet: verspätete Nachrichten an ein altes Token verwerfen.
+ * Main-Thread nach der Installationsprüfung: Benachrichtigung nur bei eingeschalteter Anzeige (Alias des Auslösers aus
+ * dem lokalen Freundes-Cache), danach immer ein Abgleich (neue Anfrage, Match, Rolle). Ohne lokales Konto verwerfen:
+ * verspätete Nachrichten an ein altes Token.
  */
 internal fun deliverPush(
     context: Context,
     message: PushMessage,
+    account: (Context) -> Pair<String, Map<String, String?>>? = ::localAccount,
+    sync: (Context, String) -> Unit = ::syncPushed,
 ) {
     val app = context.applicationContext
-    if (!AndroidPushPreferences(app).enabled) return
-    val local = localAccount(app)
-    val name =
-        message.profileId?.let { actor ->
-            local?.let { (_, friends) -> friends[actor] }
+    val (profile, friends) = account(app) ?: return
+    if (AndroidPushPreferences(app).enabled) {
+        showPush(app, message, message.profileId?.let(friends::get), message.playerId?.let { guestName(app, it) })
+    }
+    sync(app, profile)
+}
+
+/**
+ * Im Vordergrund sofort über den Konto-Host: Ein laufender Lauf bekommt einen Folgelauf, ein Backoff hält ihn nicht auf
+ * (ein Push heißt: der Server ist erreichbar). Im Hintergrund oder ohne nutzbaren Kontext: [syncSoon].
+ */
+private fun syncPushed(
+    app: Context,
+    profile: String,
+) {
+    val process = ActivityManager.RunningAppProcessInfo().also(ActivityManager::getMyMemoryState)
+    val core =
+        if (process.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND) {
+            try {
+                PhoneAccountCore.get(app, BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_KEY)
+            } catch (_: Exception) {
+                // Keystore-/Speicherfehler: wie im geplanten Lauf kein Konto-Host; der Job versucht es selbst.
+                null
+            }
+        } else {
+            null
         }
-    showPush(app, message, name, message.playerId?.let { guestName(app, it) })
-    local?.first?.let { syncSoon(app, it) }
+    if (core?.sync?.request(profile) == null) syncSoon(app, profile)
 }
 
 /** Neues Token: der nächste Abgleich lädt es hoch (PushRegistration.sync nach jedem Lauf). */
