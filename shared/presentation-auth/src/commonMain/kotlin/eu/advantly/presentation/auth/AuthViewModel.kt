@@ -10,6 +10,7 @@ import eu.advantly.cloud.sync.ConsentStatus
 import eu.advantly.cloud.sync.IdTokenProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -65,6 +66,11 @@ class AuthViewModel(
     val friends: eu.advantly.presentation.friends.FriendsViewModel? = null,
     /** Einladungen per Link/QR (plan-einladungen); Abmeldung und Altersgate verwerfen einen wartenden Link. */
     val invitations: eu.advantly.presentation.friends.InvitationsViewModel? = null,
+    /**
+     * Wartet vor der einen Nachprüfung nach einem 401/403 ohne Grund: Das Access-Token war meist abgelaufen und das SDK
+     * erneuert es kurz danach. Der Port meldet die Erneuerung nicht, daher eine feste Wartezeit (Tests: steuerbar).
+     */
+    private val awaitTokenRenewal: suspend () -> Unit = { delay(TOKEN_RENEWAL_WAIT_MS) },
 ) : ViewModel() {
     override fun onCleared() {
         support?.close()
@@ -130,8 +136,8 @@ class AuthViewModel(
                     existingAccount = false
                     // Nur eine verschwundene Sitzung ist eindeutig; ein Wechsel (z. B. Token-Rennen) sperrt nicht aus.
                     mutable.value = AuthState(busy = mutable.value.busy, error = "cloud_session_changed", unconfirmed = session != null)
-                } else if (previous == null && session != null && displayedSession == null && mutable.value.unconfirmed) {
-                    // Offline unbestätigt, inzwischen vom Host bestätigt (Sitzung wieder erneuert): anzeigen.
+                } else if (session != null && session != previous && mutable.value.unconfirmed) {
+                    // Unbestätigt, inzwischen vom Host bestätigt (Sitzung erneuert, auch ohne Umweg über null): anzeigen.
                     runAction { showSession() }
                 }
                 previous = session
@@ -143,7 +149,14 @@ class AuthViewModel(
     fun refresh() =
         runAction {
             try {
-                auth.refreshProfile()
+                try {
+                    auth.refreshProfile()
+                } catch (e: CloudException) {
+                    // 401/403 ohne Grund: meist ein abgelaufenes Token vor der Erneuerung. Zustand behalten, genau einmal nachprüfen.
+                    if (!e.permission || e.reason != "cloud_connection_failed") throw e
+                    awaitTokenRenewal()
+                    auth.refreshProfile()
+                }
                 showSession()
             } catch (e: CancellationException) {
                 throw e
@@ -431,6 +444,9 @@ class GoogleCredential(
 )
 
 private val COUNTRY_CODE = Regex("[A-Z]{2}")
+
+/** Laut Gateway-Logs folgt die Token-Erneuerung etwa eine Sekunde nach dem 401. */
+private const val TOKEN_RENEWAL_WAIT_MS = 3_000L
 
 /** Kalenderprüfung ohne Clock: das Mindestalter prüft ausschließlich der Server mit Wohnsitzzeitzone. */
 internal fun validBirthDate(value: String): Boolean {

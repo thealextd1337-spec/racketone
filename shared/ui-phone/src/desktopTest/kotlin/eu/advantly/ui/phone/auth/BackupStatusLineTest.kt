@@ -6,6 +6,8 @@ import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runDesktopComposeUiTest
+import eu.advantly.cloud.sync.CloudAuthPort
+import eu.advantly.cloud.sync.CloudException
 import eu.advantly.cloud.sync.CloudSession
 import eu.advantly.cloud.sync.ConsentSnapshot
 import eu.advantly.cloud.sync.ConsentStatus
@@ -17,6 +19,7 @@ import eu.advantly.presentation.auth.PhoneSyncStatus
 import eu.advantly.ui.phone.designsystem.AdvantlyTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.util.Locale
 import java.util.TimeZone
@@ -98,6 +101,60 @@ class BackupStatusLineTest {
         } finally {
             Locale.setDefault(original)
             TimeZone.setDefault(originalZone)
+        }
+    }
+
+    /** 401 ohne Grund, solange [expired] gilt (Access-Token vor seiner Erneuerung). */
+    private class ExpiringAuth(
+        val inner: FakePhoneAuth,
+    ) : CloudAuthPort by inner {
+        var expired = true
+
+        override suspend fun refreshProfile() {
+            inner.refreshProfile()
+            if (expired) throw CloudException("cloud_connection_failed", true)
+        }
+    }
+
+    @Test fun unconfirmedAccountShowsCheckingInsteadOfNoConnectionAndRetryRechecks() {
+        val original = Locale.getDefault()
+        try {
+            for (language in listOf("de", "en")) {
+                val de = language == "de"
+                Locale.setDefault(Locale.forLanguageTag(language))
+                runDesktopComposeUiTest {
+                    val sync = Sync().also { it.state.value = PhoneSyncState(available = true, status = PhoneSyncStatus.BACKED_UP) }
+                    val fake = FakePhoneAuth().also { it.session.value = CloudSession("alice", true) }
+                    val auth = ExpiringAuth(fake)
+                    val renewal = Channel<Unit>(Channel.UNLIMITED)
+                    val model =
+                        AuthViewModel(auth, CoroutineScope(Dispatchers.Unconfined), sync = sync, awaitTokenRenewal = { renewal.receive() })
+                    setContent { AdvantlyTheme { BackupStatusLine(model) } }
+                    val text = onNodeWithTag("backup_status_text")
+                    // Token vor der Erneuerung: kein „Keine Verbindung“, sondern Prüfung läuft.
+                    text.assertTextEquals(if (de) "Konto wird geprüft…" else "Checking your account…")
+                    runOnIdle {
+                        auth.expired = false
+                        renewal.trySend(Unit)
+                    }
+                    text.assertTextEquals(if (de) "Alles gesichert ✓" else "All backed up ✓")
+
+                    // Echter Netzfehler bleibt „Keine Verbindung“; „Erneut versuchen“ prüft das Konto und startet den Abgleich.
+                    runOnIdle {
+                        fake.failure = "connection_failed"
+                        model.refresh()
+                    }
+                    text.assertTextContains(if (de) "Keine Verbindung" else "No connection", substring = true)
+                    val refreshes = fake.calls.count { it == "refresh" }
+                    fake.failure = null
+                    onNodeWithTag("backup_action").performClick()
+                    assertEquals(refreshes + 1, fake.calls.count { it == "refresh" })
+                    assertEquals(1, sync.syncs)
+                    text.assertTextEquals(if (de) "Alles gesichert ✓" else "All backed up ✓")
+                }
+            }
+        } finally {
+            Locale.setDefault(original)
         }
     }
 
