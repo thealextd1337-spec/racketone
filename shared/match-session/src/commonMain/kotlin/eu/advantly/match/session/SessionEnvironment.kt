@@ -34,6 +34,38 @@ fun interface ThreadGuard {
     }
 }
 
+/**
+ * Messabschnitte für Plattform-Tracing (Wear OS: `android.os.Trace`, sichtbar in Perfetto/atrace). Abschnitte sind strikt
+ * geschachtelt und laufen auf dem Session-Thread; Standard ohne Wirkung.
+ */
+interface SessionTrace {
+    fun begin(section: String)
+
+    fun end()
+
+    companion object {
+        val NONE: SessionTrace =
+            object : SessionTrace {
+                override fun begin(section: String) = Unit
+
+                override fun end() = Unit
+            }
+    }
+}
+
+/** [block] als Abschnitt [name] messen. */
+inline fun <T> SessionTrace.section(
+    name: String,
+    block: () -> T,
+): T {
+    begin(name)
+    try {
+        return block()
+    } finally {
+        end()
+    }
+}
+
 /** Eigener Fehlertyp, damit Facades einen falschen Aufruf-Thread von Speicherfehlern unterscheiden können. */
 class SessionThreadViolation : IllegalStateException("MatchSession nur auf dem Scheduler-Thread aufrufen (Main-Thread)")
 

@@ -44,6 +44,7 @@ import eu.advantly.match.session.AndroidSessionAccess
 import eu.advantly.match.session.AndroidSessionBoundary
 import eu.advantly.match.session.RandomIdGenerator
 import eu.advantly.presentation.match.systemLocalDay
+import eu.advantly.wear.diagnostics.AndroidTrace
 import eu.advantly.wear.diagnostics.DiagnosticLog
 import eu.advantly.wear.glance.GlanceAction
 import eu.advantly.wear.glance.GlanceIntentConsumption
@@ -105,6 +106,9 @@ class MainActivity : ComponentActivity() {
     private var sessionAccess: AndroidSessionAccess? = null
     private var runtimeBoundary: AndroidSessionBoundary? = null
     private var runtimeJobs = mutableListOf<kotlinx.coroutines.Job>()
+
+    /** Pausiert: einmaliger Ablauf der Aufschlag-Leiste statt Sekundentakt. */
+    private var serveBarExpiry: kotlinx.coroutines.Job? = null
     private var powerReceiverRegistered = false
     private var runtimeStopped = false
 
@@ -323,12 +327,15 @@ class MainActivity : ComponentActivity() {
             }.collectAsState(TelemetryVisibility.DEFAULT)
             val liveViews by WatchLiveViews.Watch.received.collectAsState()
             val ambient = isAmbient.value
-            // Sekundentakt nur interaktiv (Staleness „Stand vor X s“); im Ambient über onUpdateAmbient
+            // Sekundentakt nur sichtbar und interaktiv (Staleness „Stand vor X s“); im Ambient über onUpdateAmbient. Pausiert
+            // läuft kein Takt: tick() kann ein Event speichern und baut das Live-Modell neu (Paket 5).
             LaunchedEffect(ambient) {
-                while (!ambient) {
-                    kotlinx.coroutines.delay(TICK_MS)
-                    if (!currentSession()) break
-                    controller.tick()
+                if (ambient) return@LaunchedEffect
+                repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                    while (currentSession()) {
+                        kotlinx.coroutines.delay(TICK_MS)
+                        if (currentSession()) controller.tick()
+                    }
                 }
             }
             WearApp(
@@ -409,6 +416,8 @@ class MainActivity : ComponentActivity() {
 
     private fun resumeRuntime() {
         if (!currentSession()) return
+        serveBarExpiry?.cancel()
+        serveBarExpiry = null
         UiVisibility.resumed = true
         controller.setInteractive(!isAmbient.value)
         consumeGlanceAction()
@@ -428,6 +437,16 @@ class MainActivity : ComponentActivity() {
         }
         UiVisibility.resumed = false
         controller.setInteractive(false)
+        // Ohne Sekundentakt: Ablauf der Aufschlag-Leiste („1. Aufschlag“) einmal zum Ausblendzeitpunkt nachholen
+        serveBarExpiry =
+            controller.state.value.live
+                ?.serveBar
+                ?.let { bar ->
+                    lifecycleScope.launch {
+                        kotlinx.coroutines.delay((bar.hideAtMillis - SystemClock.elapsedRealtime()).coerceAtLeast(0))
+                        if (currentSession()) controller.tick()
+                    }
+                }
         DiagnosticLog.log("ACTIVITY_PAUSE")
         super.onPause()
     }
@@ -501,6 +520,7 @@ class MainActivity : ComponentActivity() {
                 uptime = SystemClock::uptimeMillis,
                 today = ::systemLocalDay,
                 liveHealth = MatchHealthTallies::summary,
+                trace = AndroidTrace,
                 operationBoundary = { action ->
                     calls.run {
                         action()
