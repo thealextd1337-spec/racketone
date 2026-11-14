@@ -725,6 +725,7 @@
     <string name="whats_new_20_1">Friends and live matches now update right away – no waiting or switching tabs.</string>
     <string name="whats_new_20_2">Notifications: when you add your first friend, the app asks whether you’d like to be notified. You can turn this off anytime in your profile.</string>
     <string name="whats_new_20_3">A match tiebreak now shows in brackets in the feed and while watching.</string>
+    <string name="whats_new_20_4">Your watch reacts much faster to taps and vibrates as soon as the point is saved – also when taking over. Update the app on your watch too.</string>
     <string name="device_repair">Re-pair watches</string>
     <string name="device_repair_hint">Use this if a watch was lost or replaced. Every watch then has to confirm pairing again on the watch itself; its data stays.</string>
     <string name="device_repair_confirm_title">Re-pair all watches?</string>

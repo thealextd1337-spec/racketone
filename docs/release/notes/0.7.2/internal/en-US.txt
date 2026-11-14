@@ -3,4 +3,5 @@ New in 0.7.2:
 • Notification explainer when you add your first friend (per account); the switch only controls display.
 • “Friend accepted” appears in the list without delay.
 • Match tiebreak in brackets in the feed and while watching.
+• Watch: much faster response to taps, vibration right after saving, also when taking over.
 Please test: add a friend via QR, start a match with them as a player, they watch live (also without notification permission).

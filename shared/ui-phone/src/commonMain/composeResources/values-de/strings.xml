@@ -725,6 +725,7 @@
     <string name="whats_new_20_1">Freunde und Live-Matches sind jetzt sofort aktuell – ohne Warten oder Tab-Wechsel.</string>
     <string name="whats_new_20_2">Benachrichtigungen: Beim ersten Freund fragt die App, ob du benachrichtigt werden möchtest. Ausschalten kannst du jederzeit im Profil.</string>
     <string name="whats_new_20_3">Ein Match-Tiebreak erscheint im Feed und beim Zuschauen in Klammern.</string>
+    <string name="whats_new_20_4">Deine Uhr reagiert deutlich schneller auf Taps und vibriert, sobald der Punkt gespeichert ist – auch beim Übernehmen. Aktualisiere auch die App auf deiner Uhr.</string>
     <string name="device_repair">Uhren neu koppeln</string>
     <string name="device_repair_hint">Nutze das, wenn eine Uhr verloren ging oder ersetzt wurde. Jede Uhr muss die Kopplung danach auf der Uhr selbst neu bestätigen; ihre Daten bleiben.</string>
     <string name="device_repair_confirm_title">Alle Uhren neu koppeln?</string>

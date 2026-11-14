@@ -3,4 +3,5 @@ Neu in 0.7.2:
 • Erklärseite zu Benachrichtigungen beim ersten Freund (je Konto); der Schalter steuert nur die Anzeige.
 • „Freund angenommen“ erscheint ohne Verzögerung in der Liste.
 • Match-Tiebreak im Feed und beim Zuschauen in Klammern.
+• Uhr: deutlich schnellere Reaktion auf Taps, Vibration direkt nach dem Speichern, auch beim Übernehmen.
 Bitte testen: Freund per QR hinzufügen, Match mit ihm als Mitspieler starten, er schaut live zu (auch ohne Benachrichtigungs-Erlaubnis).
