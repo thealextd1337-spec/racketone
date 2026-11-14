@@ -8,7 +8,7 @@ der App.
 ```
 POST /functions/v1/push-dispatch   Header x-push-dispatch-secret: <PUSH_DISPATCH_SECRET>
   → claim_push_batch_v1(p_limit := 10)   je Eintrag {id, message, targets: [{deviceId, provider, token}]}
-  → FCM messages:send je Ziel (data-only, android.priority=high, ttl=3600s)
+  → FCM messages:send je Ziel (data-only, android: priority, ttl=3600s, collapse_key)
   → ack_push_batch_v1(p_results := [{id, token, result, error?}])  result = sent | error | invalid_token
   → wiederholt, solange volle Batches kommen und das Zeitbudget (10 s) reicht
 Antwort 200 {contractVersion: 1, sent, error, invalid_token}; 401 falscher Schlüssel; 503 nicht konfiguriert/Backendfehler
@@ -17,9 +17,16 @@ Antwort 200 {contractVersion: 1, sent, error, invalid_token}; 401 falscher Schl�
 - Vertrag: `supabase/migrations/20261102000200_push_outbox.sql` (ein Ergebnis je
   Ziel; ein gesendetes Ziel genügt für den Eintrag; Eintrag ohne Ziel →
   `error`/`no_target`).
-- `message` wird auf die Schlüssel `v`, `kind`, `matchId`, `profileId`, `role`
-  beschränkt und als Strings gesendet. Ohne `kind`, mit anderem `provider` als
-  `fcm` oder ohne Token → `error` (der Server verwirft nach 5 Versuchen).
+- `android.priority`: `high` nur für `scorer_invited` und `scorer_responded`
+  (Übergabe am Platz, auch im Doze), sonst `normal` – jedes angemeldete Handy
+  hat ein Token, die meisten Nachrichten stoßen nur den Abgleich an.
+  `collapse_key` = `<kind>:<matchId|profileId|->`: Wartet das Gerät (offline,
+  Doze), ersetzt eine neuere Nachricht derselben Art und desselben Bezugs die
+  ältere. Die Daten bleiben unverändert (kompatibel mit App 0.7.1).
+- `message` wird auf die Schlüssel `v`, `kind`, `matchId`, `profileId`, `role`,
+  `playerId` beschränkt und als Strings gesendet. Ohne `kind`, mit anderem
+  `provider` als `fcm` oder ohne Token → `error` (der Server verwirft nach 5
+  Versuchen).
 - `invalid_token` nur bei FCM `UNREGISTERED` oder `INVALID_ARGUMENT` zum Feld
   `message.token`; andere `INVALID_ARGUMENT` (eigener Fehler) sowie
   401/429/5xx/Netzfehler → `error`.
