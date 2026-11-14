@@ -188,7 +188,7 @@ internal class PhoneAccountCore private constructor(
     apiUrl: String,
     apiKey: String,
 ) {
-    val storage = PhoneAuthStorage(context)
+    val storage = PhoneAuthStorage(context, apiUrl)
     val client =
         createSupabaseClient(apiUrl, apiKey) {
             // SDK-Debuglogs enthalten Session-Objekte: auch im Debug-Build ausdrücklich abschalten.
