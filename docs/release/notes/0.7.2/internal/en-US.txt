@@ -1,0 +1,6 @@
+New in 0.7.2:
+• Friends and live matches update right away: silent push prompts for every phone, live via a realtime connection.
+• Notification explainer when you add your first friend (per account); the switch only controls display.
+• “Friend accepted” appears in the list without delay.
+• Match tiebreak in brackets in the feed and while watching.
+Please test: add a friend via QR, start a match with them as a player, they watch live (also without notification permission).
