@@ -7,6 +7,7 @@ import android.content.Context
 import android.os.Looper
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import eu.advantly.cloud.sync.CloudSession
 import eu.advantly.cloud.sync.PushTokenPort
 import eu.advantly.presentation.push.HINT_HIDDEN_MS
 import eu.advantly.presentation.push.PushPreferences
@@ -34,11 +35,11 @@ class AndroidNotificationSettingsTest {
     private val context: Application = RuntimeEnvironment.getApplication()
     private val stored = context.getSharedPreferences(AndroidPushPreferences.FILE, Context.MODE_PRIVATE)
     private val activity = Robolectric.buildActivity(ComponentActivity::class.java).setup().get()
+    private var account = "a"
     private val push =
         PushRegistration(
             object : PushPreferences {
                 override var enabled = false
-                override var hintDone = false
                 override var uploaded: String? = null
             },
             object : PushTokenSource {
@@ -53,7 +54,7 @@ class AndroidNotificationSettingsTest {
                     token: String?,
                 ) {}
             },
-        ) { null }
+        ) { CloudSession(account, true) }
     private var requests = 0
 
     private fun settings() = AndroidNotificationSettings(activity, push, CoroutineScope(Dispatchers.Unconfined)) { requests++ }
@@ -98,13 +99,19 @@ class AndroidNotificationSettingsTest {
         assertFalse(settings.prompt.value)
     }
 
-    /** Entscheidung 2: Wer in 0.7.x schon ein- oder ausgeschaltet hat (`hint_done`), sieht nur noch den Hinweis. */
-    @Test fun existingUsersWhoDecidedOnlySeeTheHint() {
+    /** Nutzerentscheid 14.11.2026: Die Frage kommt für jedes Konto, auch nach `hint_done` aus 0.7.x. */
+    @Test fun everyAccountIsAskedEvenAfterAnEarlierDecision() {
         stored.edit().putBoolean("hint_done", true).commit()
         val settings = settings()
         settings.onMoment()
+        assertTrue(settings.prompt.value)
+        settings.later()
+        settings.later()
+        settings.onMoment()
         assertFalse(settings.prompt.value)
-        assertTrue(settings.hint.value)
+        account = "b"
+        settings.onMoment()
+        assertTrue(settings.prompt.value)
     }
 
     @Test fun laterReturnsAfterFourteenDaysOnly() {
@@ -113,7 +120,7 @@ class AndroidNotificationSettingsTest {
         settings.later()
         settings.onMoment()
         assertFalse(settings.prompt.value)
-        stored.edit().putLong("prompt_later_at", System.currentTimeMillis() - 15L * 24 * 60 * 60 * 1000).commit()
+        stored.edit().putLong("prompt_later_at_a", System.currentTimeMillis() - 15L * 24 * 60 * 60 * 1000).commit()
         settings.onMoment()
         assertTrue(settings.prompt.value)
     }

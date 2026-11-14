@@ -144,7 +144,6 @@ class PhoneAccountPortTest {
             val prefs =
                 object : PushPreferences {
                     override var enabled = false
-                    override var hintDone = false
                     override var uploaded: String? = null
                 }
             val push =

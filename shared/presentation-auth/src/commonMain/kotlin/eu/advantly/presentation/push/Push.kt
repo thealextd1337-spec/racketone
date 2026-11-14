@@ -98,11 +98,10 @@ interface NotificationSettingsPort {
     fun dismissHint()
 }
 
-/** Gerätelokal (nicht im Backup): Anzeige gewünscht, Hinweis und zuletzt hochgeladenes Konto + Token. */
+/** Gerätelokal (nicht im Backup): Anzeige gewünscht und zuletzt hochgeladenes Konto + Token. */
 interface PushPreferences {
     /** Benachrichtigungen anzeigen; das Token hängt nicht daran. */
     var enabled: Boolean
-    var hintDone: Boolean
 
     /** `"<profileId>\n<token>"` oder `null`. */
     var uploaded: String?
@@ -133,8 +132,9 @@ class PushRegistration(
     private var confirmed: String? = null
     private val mutableEnabled = MutableStateFlow(prefs.enabled)
     val enabled: StateFlow<Boolean> = mutableEnabled.asStateFlow()
-    private val mutableHint = MutableStateFlow(!prefs.hintDone && !prefs.enabled)
-    val hint: StateFlow<Boolean> = mutableHint.asStateFlow()
+
+    /** Angemeldetes Konto; der Stand der Erklärseite gilt je Konto. */
+    val profileId: String? get() = session()?.profileId
 
     /** Anzeige an (nach erteilter Systemberechtigung); lädt das Token hoch, falls noch nicht geschehen. */
     suspend fun enable() =
@@ -144,23 +144,13 @@ class PushRegistration(
         }
 
     /**
-     * Anzeige aus; das Token bleibt für den stillen Abgleich. Abmelden und Löschantrag ([signedOut]) leeren es zusätzlich,
-     * der einmalige Hinweis erscheint nach erneuter Anmeldung wieder.
+     * Anzeige aus; das Token bleibt für den stillen Abgleich. Abmelden und Löschantrag ([signedOut]) leeren es zusätzlich.
      */
     suspend fun disable(signedOut: Boolean = false) =
         mutex.withLock {
             setEnabled(false)
-            if (signedOut) {
-                prefs.hintDone = false
-                mutableHint.value = true
-                quietly { clear() }
-            }
+            if (signedOut) quietly { clear() }
         }
-
-    fun dismissHint() {
-        prefs.hintDone = true
-        mutableHint.value = false
-    }
 
     /** Neues Token, App-Start, nach jedem Abgleich: holt Ausstehendes nach (auch das Leeren nach einem Löschantrag). */
     suspend fun sync() =
@@ -177,7 +167,6 @@ class PushRegistration(
     private fun setEnabled(value: Boolean) {
         prefs.enabled = value
         mutableEnabled.value = value
-        dismissHint()
     }
 
     private suspend fun upload() {

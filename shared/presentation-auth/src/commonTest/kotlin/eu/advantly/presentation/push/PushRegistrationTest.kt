@@ -17,7 +17,6 @@ private const val ALEX = "0190a5f2-2222-7000-8000-000000000002"
 class PushRegistrationTest {
     private class Prefs : PushPreferences {
         override var enabled = false
-        override var hintDone = false
         override var uploaded: String? = null
     }
 
@@ -57,12 +56,10 @@ class PushRegistrationTest {
             val rig = Rig()
             val push = rig.registration()
             assertFalse(push.enabled.value)
-            assertTrue(push.hint.value)
             push.sync()
             assertEquals(listOf("token", "set:alice:fcm:t1"), rig.log)
             assertEquals("alice\nt1", rig.prefs.uploaded)
             assertFalse(push.enabled.value)
-            assertTrue(push.hint.value, "der Upload entscheidet nichts über die Anzeige")
         }
 
     @Test fun consentUploadsOnceAndNewTokensAgain(): Unit =
@@ -71,7 +68,6 @@ class PushRegistrationTest {
             val push = rig.registration()
             push.enable()
             assertTrue(push.enabled.value)
-            assertFalse(push.hint.value)
             push.sync()
             rig.token = "t7"
             push.sync()
@@ -163,28 +159,18 @@ class PushRegistrationTest {
             assertEquals(listOf("delete", "token", "set:bob:fcm:t2"), rig.log)
         }
 
-    @Test fun hintIsShownOnceUntilDismissed() {
-        val rig = Rig()
-        rig.registration().dismissHint()
-        assertFalse(rig.registration().hint.value)
-        rig.prefs.hintDone = false
-        rig.prefs.enabled = true
-        assertFalse(rig.registration().hint.value)
-    }
-
-    /** N10: Abmelden lässt Push aus, der Hinweis kommt nach erneuter Anmeldung wieder; Ausschalten blendet ihn aus. */
-    @Test fun signingOutKeepsPushOffButShowsTheHintAgain(): Unit =
+    /** Abmelden schaltet die Anzeige aus und leert das Token; Ausschalten allein lässt das Token stehen. */
+    @Test fun signingOutTurnsTheDisplayOffAndClearsTheToken(): Unit =
         runBlocking {
             val rig = Rig()
             val push = rig.registration()
             push.enable()
-            assertFalse(push.hint.value)
+            push.disable()
+            assertFalse(push.enabled.value)
+            assertEquals("alice\nt1", rig.prefs.uploaded)
             push.disable(signedOut = true)
             assertFalse(push.enabled.value)
-            assertTrue(push.hint.value)
-            assertTrue(rig.registration().hint.value, "übersteht den Neustart")
-            push.disable()
-            assertFalse(push.hint.value)
+            assertNull(rig.prefs.uploaded)
         }
 
     @Test fun parsesOnlyKnownVersionAndKindsAndValidIds() {

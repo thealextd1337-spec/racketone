@@ -41,7 +41,8 @@ internal class AndroidNotificationSettings(
 ) : NotificationSettingsPort,
     NotificationPromptPort {
     private val prefs = activity.getSharedPreferences(AndroidPushPreferences.FILE, Context.MODE_PRIVATE)
-    private val machine = NotificationPrompt(AndroidPromptStore(prefs), System::currentTimeMillis)
+    private val store = AndroidPromptStore(prefs)
+    private val machine = NotificationPrompt(store, System::currentTimeMillis)
     private val allowed = MutableStateFlow(systemAllowed())
 
     /** Neu auswerten: Hinweis ausgeblendet, Frist abgelaufen. */
@@ -66,7 +67,10 @@ internal class AndroidNotificationSettings(
         tick.value++
     }
 
-    override fun onMoment() = machine.onMoment(displayOn())
+    override fun onMoment() {
+        store.profileId = push.profileId
+        machine.onMoment(displayOn())
+    }
 
     override fun accept() {
         machine.decided()
@@ -127,21 +131,27 @@ internal class AndroidNotificationSettings(
 }
 
 /**
- * Stand der Erklärseite in [AndroidPushPreferences.FILE] (nicht im Backup). Ohne gespeicherten Stand (Update von 0.7.x):
- * wer nie entschieden hat (`hint_done` aus), sieht die Seite einmal; wer schon ein- oder ausgeschaltet hat, nur den Hinweis.
+ * Stand der Erklärseite in [AndroidPushPreferences.FILE] (nicht im Backup), je Konto: Jedes Konto, das sich auf diesem
+ * Handy anmeldet, bekommt die Frage – auch nach einem Update von 0.7.x (Nutzerentscheid 14.11.2026). Nur wer schon
+ * Benachrichtigungen anzeigt, sieht sie nicht ([NotificationPrompt.onMoment]). Der Hinweis im Freunde-Tab bleibt gerätelokal.
  */
 internal class AndroidPromptStore(
     private val prefs: SharedPreferences,
 ) : NotificationPromptStore {
+    /** Zuletzt gemeldetes Konto; Antworten auf die Erklärseite folgen immer auf dessen Moment. */
+    var profileId: String? = null
+
     override var stage: PromptStage
         get() =
-            prefs.getString("prompt_stage", null)?.let { saved -> PromptStage.entries.firstOrNull { it.name == saved } }
-                ?: if (prefs.getBoolean("hint_done", false) || prefs.getBoolean("enabled", false)) PromptStage.DONE else PromptStage.NEW
-        set(value) = prefs.edit().putString("prompt_stage", value.name).apply()
+            prefs.getString(key("prompt_stage"), null)?.let { saved -> PromptStage.entries.firstOrNull { it.name == saved } }
+                ?: PromptStage.NEW
+        set(value) = prefs.edit().putString(key("prompt_stage"), value.name).apply()
     override var laterAtMs: Long
-        get() = prefs.getLong("prompt_later_at", 0)
-        set(value) = prefs.edit().putLong("prompt_later_at", value).apply()
+        get() = prefs.getLong(key("prompt_later_at"), 0)
+        set(value) = prefs.edit().putLong(key("prompt_later_at"), value).apply()
     override var hintHiddenAtMs: Long
         get() = prefs.getLong("hint_hidden_at", 0)
         set(value) = prefs.edit().putLong("hint_hidden_at", value).apply()
+
+    private fun key(name: String) = "${name}_${profileId.orEmpty()}"
 }

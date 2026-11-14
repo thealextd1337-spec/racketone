@@ -75,9 +75,6 @@ internal class AndroidPushPreferences(
     override var enabled: Boolean
         get() = prefs.getBoolean("enabled", false)
         set(value) = prefs.edit().putBoolean("enabled", value).apply()
-    override var hintDone: Boolean
-        get() = prefs.getBoolean("hint_done", false)
-        set(value) = prefs.edit().putBoolean("hint_done", value).apply()
     override var uploaded: String?
         get() = prefs.getString("uploaded", null)
         set(value) = prefs.edit().putString("uploaded", value).apply()
