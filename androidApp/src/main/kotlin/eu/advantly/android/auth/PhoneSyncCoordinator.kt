@@ -84,6 +84,10 @@ internal class PhoneSyncCoordinator(
     private var context: PhoneCloudContext? = null
     private var cycle: Job? = null
     private var networkRecoveryPending = false
+
+    // Der laufende Lauf hat seinen Download begonnen; ein Anstoß danach ([requested]) bekommt einen Folgelauf.
+    private var downloading = false
+    private var requested = false
     private var lastEndMs: Long? = null
     private var closed = false
 
@@ -111,6 +115,7 @@ internal class PhoneSyncCoordinator(
             cycle?.cancel()
             cycle = null
             networkRecoveryPending = false
+            requested = false
             // Geplante Arbeit des alten Kontos endet sofort; ein Auftrag prüft beim Start zusätzlich sein Konto.
             if (previous != null) scheduler.cancel()
             mutable.value = PhoneSyncState(available = next != null, lastBackupAtMs = next?.let { record.lastBackupAtMs(it.profile) })
@@ -160,17 +165,22 @@ internal class PhoneSyncCoordinator(
      */
     fun request(profile: String?): Job? = trigger(profile)
 
-    /** Ein laufender Lauf deckt den Auslöser ab; was er nicht mehr sah, holt sein Folgelauf nach. */
+    /**
+     * Ein laufender Lauf deckt den Auslöser ab, solange sein Download noch nicht begann. Danach (etwa ein Push, dessen
+     * Server-Stand nach der Abfrage entstand) folgt ihm genau ein Folgelauf, der alle solchen Auslöser zusammenfasst.
+     */
     private fun trigger(profile: String?): Job? {
         confined()
         val expected = synchronize() ?: return null
         if (profile != null && profile != expected.profile) return null
+        if (cycle != null && downloading) requested = true
         return launch(expected)
     }
 
     /**
      * Änderten sich lokale Daten während des Uploads (etwa das Matchende), folgt genau ein weiterer Lauf. Ein Folgelauf
-     * erzeugt keinen eigenen, sonst liefe der Abgleich während eines Live-Matches dauerhaft.
+     * erzeugt keinen eigenen, sonst liefe der Abgleich während eines Live-Matches dauerhaft. Ein Folgelauf für Auslöser
+     * ([requested]) ist ein normaler Lauf: Er entsteht nur aus einem neuen Auslöser, nie aus sich selbst.
      */
     private fun launch(
         expected: PhoneCloudContext,
@@ -188,16 +198,19 @@ internal class PhoneSyncCoordinator(
                 } finally {
                     if (cycle === job) {
                         val retryNetwork = completed && networkRecoveryPending && mutable.value.status == PhoneSyncStatus.CONNECTION_FAILED
+                        val asked = completed && requested
                         networkRecoveryPending = false
+                        requested = false
                         cycle = null
                         lastEndMs = nowMs()
                         mutable.value = mutable.value.copy(running = false)
                         // Der Netz-Nachlauf ist ein normaler Lauf und darf selbst noch einen Folgelauf haben.
-                        if (closed || !(again || retryNetwork)) onRunEnded() else launch(expected, followUp = again)
+                        if (closed || !(again || retryNetwork || asked)) onRunEnded() else launch(expected, followUp = again && !asked)
                     }
                 }
             }
         cycle = job
+        downloading = false
         mutable.value = mutable.value.copy(running = true)
         job.start()
         return job
@@ -207,11 +220,12 @@ internal class PhoneSyncCoordinator(
     private suspend fun run(expected: PhoneCloudContext): Boolean {
         var passes = 0
         while (true) {
+            downloading = true
             val pulled =
                 if (pull == null) {
                     null
                 } else {
-                    pass(expected, pull::start) { pull.state.value.takeIf { it.result != null } } ?: return false
+                    pass(expected, pull::start, { pull.state.value.busy }) { pull.state.value.takeIf { it.result != null } } ?: return false
                 }
             if (pulled?.result == PhonePullResult.CANCELLED) return false
             val uploaded = pass(expected, upload::start) { upload.state.value.takeIf { it.result != null } } ?: return false
@@ -229,19 +243,23 @@ internal class PhoneSyncCoordinator(
     }
 
     /**
-     * Eine schon laufende Fremdaktion (Statusabfrage, abgebrochener Altlauf) zählt nicht: danach einmal selbst starten.
-     * Vor jedem Start und jedem Ergebnis gilt noch derselbe Kontext; sonst weder Ergebnis noch Start fürs neue Konto.
+     * Eine schon laufende Fremdaktion (Statusabfrage, abgebrochener Altlauf, Download des Freunde-Tabs: [busy]) zählt
+     * nicht: danach einmal selbst starten. Vor jedem Start und jedem Ergebnis gilt noch derselbe Kontext; sonst weder
+     * Ergebnis noch Start fürs neue Konto.
      */
     private suspend fun <S : Any> pass(
         expected: PhoneCloudContext,
         start: () -> Job?,
+        busy: () -> Boolean = { false },
         result: () -> S?,
     ): S? {
-        repeat(2) {
+        repeat(2) { attempt ->
             if (synchronize() != expected) return null
+            // Ein Fremd-Download begann womöglich vor dem Auslöser: sein Ergebnis zählt nur im letzten Versuch.
+            val foreign = attempt == 0 && busy()
             (start() ?: return null).join()
             if (synchronize() != expected) return null
-            result()?.let { return it }
+            if (!foreign) result()?.let { return it }
         }
         return null
     }
